@@ -1,0 +1,3 @@
+# 上游镜像引用（每行一个；供 Track Upstream Images 跟踪 digest 变化）
+ghcr.io/agent-infra/sandbox:latest
+ghcr.io/tencentcloud/cubesandbox-base:latest

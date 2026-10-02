@@ -1,0 +1,72 @@
+name: Track Upstream Images
+
+# 跟踪各目录 upstream.txt 声明的上游镜像 digest；
+# 变更时：记录 digest → 触发 Build Images 重建 → 开 issue 提醒重新注册模板。
+# 首次运行只记录基线，不误报。
+
+on:
+  schedule:
+    - cron: "0 20 * * *" # 每天 UTC 20:00（北京时间 04:00）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 采集上游 digest
+        id: collect
+        run: |
+          set -euo pipefail
+          mkdir -p upstream
+          refs=$(find . -name upstream.txt -not -path "./.github/*" | sort | xargs cat \
+            | sed 's/#.*//' | sed '/^[[:space:]]*$/d' | sort -u)
+          echo "跟踪清单:"; echo "$refs"
+          changed=0; wrote=0
+          while IFS= read -r src; do
+            [ -z "$src" ] && continue
+            name=$(echo "$src" | tr '/:' '__')
+            digest=$(docker buildx imagetools inspect "$src" --format '{{json .Manifest.Digest}}' | tr -d '"')
+            old=""; [ -f "upstream/$name.digest" ] && old=$(cat "upstream/$name.digest")
+            if [ "$old" != "$digest" ]; then
+              echo "$digest" > "upstream/$name.digest"; wrote=1
+              if [ -n "$old" ]; then changed=1; echo "$name: $old -> $digest"; else echo "$name: 记录基线 $digest"; fi
+            fi
+          done <<< "$refs"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "wrote=$wrote" >> "$GITHUB_OUTPUT"
+
+      - name: 提交 digest 变更
+        if: steps.collect.outputs.wrote == '1'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add upstream
+          git diff --cached --quiet || git commit -m "chore: 上游镜像 digest 更新 $(date -u +%F)"
+          git push
+
+      - name: 触发重建
+        if: steps.collect.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run build.yml || echo "(自动触发失败，请手动 dispatch Build Images)"
+
+      - name: 开 issue 通知
+        if: steps.collect.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "上游镜像已更新，请重新注册 CubeSandbox 模板 $(date -u +%F)" \
+            --body "$(cat <<'EOF'
+          检测到上游镜像 digest 变化，已触发镜像重建（:latest）。
+          重建完成后，请在 CubeSandbox 控制节点按对应目录的 README 重新注册模板。
+          最新 digest 见仓库 `upstream/` 目录的最近一次提交。
+          EOF
+          )"
