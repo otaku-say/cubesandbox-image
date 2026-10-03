@@ -45,29 +45,22 @@ echo "  v2 /v2/sandbox      => ${v2}"
 
 echo "[3/6] 执行面（v2 + v1）"
 out="$(curl -fsS -X POST http://127.0.0.1:18091/v2/commands -H 'Content-Type: application/json' \
-    -d '{"command":"id -u; echo smoke-ok; uname -m"}')"
+    -d '{"command":"echo UID=$(id -u); echo smoke-ok; uname -m"}')"
 printf '%s' "${out}" | grep -q "smoke-ok" && echo "  ✔ /v2/commands" || { echo "  ✘ /v2/commands: ${out}" >&2; exit 1; }
 curl -fsS -X POST http://127.0.0.1:18091/v1/bash/exec -H 'Content-Type: application/json' \
     -d '{"command":"echo v1-ok"}' | grep -q "v1-ok" && echo "  ✔ /v1/bash/exec"
 # 执行账户（base 以 root 运行，aiod 应同样以 root 执行命令）
-uid="$(printf '%s' "${out}" | python3 -c '
-import json,sys
-d=json.load(sys.stdin)
-c=d.get("data",{}).get("command",{})
-print((c.get("stdout") or "").splitlines()[0] if c.get("stdout") else "")
-' 2>/dev/null || true)"
-echo "  执行账户 id -u => ${uid:-未知}（期望 0）"
+uid="$(printf '%s' "${out}" | grep -o 'UID=[0-9]*' | head -1 || true)"
+echo "  执行账户 ${uid:-UID=未捕获}（期望 UID=0）"
 
 echo "[4/6] 能力面（?refresh=true 强制新探测，绕开 5s 缓存）"
 curl -fsS "http://127.0.0.1:18091/v1/capabilities?refresh=true" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)["data"]
-ci = d.get("code_interpreter", {})
-br = d.get("browser", {})
-co = d.get("computer", {})
-print(f"  code_interpreter: {ci.get(\"status\")} kinds={ci.get(\"kinds\")}")
-print(f"  browser: {br.get(\"status\")}（轻量镜像预期 absent/degraded）")
-print(f"  computer: {co.get(\"status\")}（轻量镜像预期 absent）")
+ci, br, co = d.get("code_interpreter", {}), d.get("browser", {}), d.get("computer", {})
+print("  code_interpreter:", ci.get("status"), "kinds=", ci.get("kinds"))
+print("  browser:", br.get("status"), "（轻量镜像预期 absent/degraded）")
+print("  computer:", co.get("status"), "（轻量镜像预期 absent）")
 '
 echo "  code-interpreter :49999 => $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:49999/ || true)"
 echo "  aiod doctor（探测 bash/rg/tmux/浏览器进程/CDP 端口）:"
