@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 冒烟测试（aio-daemon 套壳）：envd 契约 → nginx 网关 → v1/v2 双面 → 能力
+# 冒烟测试（aio-daemon 套壳）：envd 契约 → 网关端口发现 → v1/v2 双面 → 能力
 # 用法: smoke-test.sh <image>          （需本机有 docker）
+# 说明: 上游 1.0.1 的网关端口与文档不一致（banner 指向 8080，文档写 8091），
+#       因此这里同时发布 8080/8091，运行时探测哪个在服务。
 # =============================================================================
 set -euo pipefail
 
 IMG="${1:?用法: smoke-test.sh <image>}"
 NAME="aiod2-smoke-$$"
 ENVD_HOST_PORT="${ENVD_HOST_PORT:-49983}"
-AIO_HOST_PORT="${AIO_HOST_PORT:-8091}"
-AIO="http://127.0.0.1:${AIO_HOST_PORT}"
+CANDIDATE_PORTS=("${AIO_PORT:-}" 8080 8091)
 
 cleanup() { docker rm -f "${NAME}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 echo "== 启动容器 ${NAME}（${IMG}） =="
-docker run -d --name "${NAME}" -p "${ENVD_HOST_PORT}:49983" -p "${AIO_HOST_PORT}:8091" "${IMG}" >/dev/null
+docker run -d --name "${NAME}" \
+    -p "${ENVD_HOST_PORT}:49983" -p 8080:8080 -p 8091:8091 "${IMG}" >/dev/null
 
 # need <说明> <url> <期望状态码> [超时秒]
 need() {
@@ -29,15 +31,33 @@ need() {
         sleep 1
     done
     echo "  ✘ ${desc} => ${code:-无响应}（期望 ${want}）" >&2
-    docker logs "${NAME}" 2>&1 | tail -n 60 >&2
+    docker logs "${NAME}" 2>&1 | grep -aiE "error|fail|banner|listening|Dashboard" | tail -n 30 >&2
     return 1
 }
 
 echo "[1/5] envd 契约"
 need "envd :49983/health" "http://127.0.0.1:${ENVD_HOST_PORT}/health" 204 60
 
-echo "[2/5] AIO 网关（nginx :8091，服务树起来较慢）"
-need "gateway /v1/capabilities" "${AIO}/v1/capabilities" 200 150
+echo "[2/5] 网关端口发现 + AIO API 就绪（最多 150s）"
+AIO=""
+deadline=$((SECONDS + 150))
+while [ "${SECONDS}" -lt "${deadline}" ]; do
+    for p in "${CANDIDATE_PORTS[@]}"; do
+        [ -z "${p}" ] && continue
+        code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${p}/v1/capabilities" || true)"
+        if [ "${code}" = "200" ]; then
+            AIO="http://127.0.0.1:${p}"
+            echo "  ✔ 网关在宿主端口 ${p} 上服务（/v1/capabilities => 200）"
+            break 2
+        fi
+    done
+    sleep 5
+done
+if [ -z "${AIO}" ]; then
+    echo "  ✘ 8080/8091 均未就绪" >&2
+    docker logs "${NAME}" 2>&1 | tail -n 60 >&2
+    exit 1
+fi
 
 echo "[3/5] API 面核对：v1 与 v2 都必须存在"
 v1="$(curl -s -o /dev/null -w '%{http_code}' "${AIO}/v1/capabilities")"
@@ -63,4 +83,4 @@ echo "[5/5] 体积"
 size="$(docker image inspect "${IMG}" --format '{{.Size}}')"
 awk -v s="${size}" 'BEGIN { printf "  镜像体积: %.2f GB\n", s/1024/1024/1024 }'
 
-echo "✔ 冒烟测试全部通过：${IMG}"
+echo "✔ 冒烟测试全部通过：${IMG}（AIO 网关宿主端口：${AIO##*:}）"

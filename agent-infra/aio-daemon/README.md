@@ -21,7 +21,9 @@
 
 ```
 aio-daemon 1.0.1（上游整套）
-├── nginx 网关 :8091       ← 对外唯一入口（转发到 aiod 18091 / computer-use 18100）
+├── nginx 网关 :8080/:8091 ← 对外入口（转发到 aiod 18091 / computer-use 18100）
+│                           ⚠️ 文档写 8091、镜像 banner 指向 8080 —— 冒烟测试自动发现，
+│                           注册模板时把两个端口都 expose 最稳
 ├── aiod :18091（loopback）← v1 + v2 双面 API
 ├── Chromium + VNC + 桌面与工具链（Python/Node/Go/uv/Jupyter/code-server…）
 └── 本次注入：envd :49983  ← E2B/CubeSandbox 数据面（tini + cube-entrypoint 契约）
