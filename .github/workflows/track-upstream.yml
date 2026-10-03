@@ -66,6 +66,41 @@ jobs:
           done
           echo "found=$found" >> "$GITHUB_OUTPUT"
 
+      - name: aiod 新版本巡检（agent-infra/aio-code，比对 latest 与固定版本的 SHA256）
+        id: aiod
+        run: |
+          set -euo pipefail
+          B=https://aio-static.tos-cn-beijing.volces.com
+          dir=agent-infra/aio-code
+          found=0
+          if [ -f "$dir/Dockerfile" ]; then
+            pinned=$(sed -nE 's/^ARG AIOD_VERSION=([^ ]+).*/\1/p' "$dir/Dockerfile" | head -1)
+            # SHA256SUMS 第一行 aiod 的校验值 = 该版本的二进制指纹
+            sha_pin=$(curl -fsSL "$B/$pinned/linux-x86_64/SHA256SUMS" | awk '$2=="aiod"{print $1; exit}')
+            sha_new=$(curl -fsSL "$B/latest/linux-x86_64/SHA256SUMS" | awk '$2=="aiod"{print $1; exit}')
+            echo "pinned=$pinned sha_pin=${sha_pin:0:12}… sha_latest=${sha_new:0:12}…"
+            if [ -n "${sha_pin:-}" ] && [ -n "${sha_new:-}" ] && [ "$sha_pin" != "$sha_new" ]; then
+              echo "aiod 有新版本（latest 指纹与 $pinned 不同）" | tee /tmp/aiod-new.txt
+              found=1
+            fi
+          fi
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+
+      - name: 开 issue 提醒升级 aiod
+        if: steps.aiod.outputs.found == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "aiod 发布了新版本 $(date -u +%F)" \
+            --body "$(cat <<'EOF'
+          latest/linux-x86_64/aiod 的 SHA256 与 agent-infra/aio-code 固定的版本不一致。
+
+          处理方式：把该目录 Dockerfile 的 `ARG AIOD_VERSION` 改成新版本（或核对发布页确认），
+          push 到 main → CI 自动重建 :latest，再用 `cubesandbox-sdk-go tpl-from-image ... --create` 更新模板。
+          EOF
+          )"
+
       - name: 开 issue 提醒升级 tag（Harbor）
         if: steps.harbor.outputs.found == '1'
         env:
