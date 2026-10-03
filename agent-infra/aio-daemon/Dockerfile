@@ -46,3 +46,16 @@ LABEL org.opencontainers.image.title="CubeSandbox AIO (aio-daemon)" \
       org.opencontainers.image.source="https://github.com/otaku-say/cubesandbox-image" \
       io.cubesandbox.envd.ref="2026.16" \
       io.cubesandbox.upstream.tag="${AIO_DAEMON_TAG}"
+
+# ---- 3) 模板默认值（建模板免手填） ------------------------------------------
+# 任何工具都能从 registry 的镜像 config 里读到这些值；本仓库配套命令：
+#   cubesandbox-sdk-go tpl-from-image ghcr.io/otaku-say/cubesandbox-image/agent-infra/aio-daemon:latest
+# → 直接输出/提交 CubeSandbox 建模板请求（exposedPorts / probe / 可写层 / CPU / 内存 / 别名全部填好）
+LABEL io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080],"probePort":49983,"probePath":"/health","writableLayerSize":"12G","cpu":2000,"memory":3072,"alias":"aio-daemon-small","notes":"envd 49983 + AIO 网关 8080"}' \
+      io.cubesandbox.template.exposed-ports="49983,8080" \
+      io.cubesandbox.template.probe-port="49983" \
+      io.cubesandbox.template.probe-path="/health" \
+      io.cubesandbox.template.writable-layer-size="12G" \
+      io.cubesandbox.template.cpu="2000" \
+      io.cubesandbox.template.memory="3072" \
+      io.cubesandbox.template.alias="aio-daemon-small"

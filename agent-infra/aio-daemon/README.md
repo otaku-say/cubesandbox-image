@@ -85,20 +85,38 @@ BASE="https://<cubesandbox-proxy-host>/sandbox/<sandboxID>/8080" python3 tests/s
 | `/v2/browser/screenshot` | `format=png` 直接返回 PNG 字节流 |
 | `/v2/browser/snapshot` | 返回可访问性快照（带 ref），可配合 `click/fill` 的 `ref` 用 |
 
-## 在 CubeSandbox 里注册模板（实测参数）
+## 在 CubeSandbox 里注册模板（默认值已写进镜像，免手填）
+
+镜像里带了 `io.cubesandbox.template.*` 标签，一条命令读出并直接建模板：
 
 ```bash
-# 平台侧（expose envd 49983 + 网关 8080；probe 用 envd，~1s 就绪）
+# 只看会提交什么（读 registry 里的镜像配置）
+cubesandbox-sdk-go tpl-from-image ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-daemon:latest
+
+# 直接提交给平台（--curl 则输出可执行的 curl；--cpu/--memory 可临时覆盖）
+cubesandbox-sdk-go tpl-from-image ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-daemon:latest --create
+```
+
+等价手工参数（与标签内容一致）：
+
+```bash
 POST /templates
 {
-  "name": "aio-daemon",
+  "name": "aio-daemon-small",
   "image": "ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-daemon:latest",   # 建议用 digest 固定
   "writableLayerSize": "12G",          # 镜像解压后 7.4GB，可写层给足
   "exposedPorts": [49983, 8080],
   "probePort": 49983, "probePath": "/health",
-  "cpu": 4000, "memory": 6144
+  "cpu": 2000, "memory": 3072
 }
 ```
+
+> **标签约定**（`docker inspect` 可见，registry config 可读；平台自身目前不读取——
+> CubeTemplateCenter 源码注释明确 "ExposedPorts/Labels/Healthcheck ... intentionally omitted"）：
+> `io.cubesandbox.template.defaults`（JSON 汇总）+ 单键 `exposed-ports` / `probe-port` /
+> `probe-path` / `writable-layer-size` / `cpu` / `memory` / `alias`。
+> 无标签的镜像由 `tpl-from-image` 回退读标准 `EXPOSE`。
+> 例子：`pods` 里的 CPU/内存按宿主机余量调（本集群 2C/3G 跑得动）。
 
 > 实测（2026-10-03）：模板构建约 12 分钟（7.4GB 镜像 pull + rootfs 分发）；
 > 沙箱创建后 envd `204` 约 4 秒、网关 `200` 约 4 秒可用。
@@ -124,4 +142,4 @@ sandbox-sdk-go exec "id; uname -a"
 - **优点**：官方 2.x 全套（含 VNC 桌面、Jupyter、code-server、多语言工具链），v1/v2 双面，注入层只有一个 COPY 步骤，升级成本 = 改 tag。
 - **代价**：体积大（约 3 GB 压缩 / 解压后更大），内容与版本随上游；构建与模板拉取都依赖**火山 Harbor 可达**（公开项目可匿名拉取，实测从 iSH 可拉）。
 - **只有 envd 是"外来户"**：其余全是上游原样，出问题先看 `/opt/gem/run.sh` 与上游文档。
-- 端口以实测为准：nginx 监听 `8091`（文档与 `SANDBOX_SRV_PORT` 一致）；镜像元数据里声明的 `8080` 不一定是网关端口，注册模板时以冒烟测试结果为准。
+- 端口以实测为准：本镜像 nginx 网关实际监听 **8080**（上游文档写 8091，实测 1.0.1 不监听 8091）；镜像 `EXPOSE` 同时声明了 49983/8080/8091/9222，注册模板用 49983+8080。

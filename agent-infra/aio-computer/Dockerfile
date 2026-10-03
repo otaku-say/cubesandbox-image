@@ -44,3 +44,17 @@ LABEL org.opencontainers.image.title="CubeSandbox AIO (aio-computer)" \
       org.opencontainers.image.source="https://github.com/otaku-say/cubesandbox-image" \
       io.cubesandbox.envd.ref="2026.16" \
       io.cubesandbox.upstream.tag="${AIO_COMPUTER_TAG}"
+
+# ---- 3) 模板默认值（建模板免手填） ------------------------------------------
+# 任何工具都能从 registry 的镜像 config 里读到这些值；本仓库配套命令：
+#   cubesandbox-sdk-go tpl-from-image ghcr.io/otaku-say/cubesandbox-image/agent-infra/aio-computer:latest
+# → 直接输出/提交 CubeSandbox 建模板请求（exposedPorts / probe / 可写层 / CPU / 内存 / 别名全部填好）
+# 桌面镜像偏重：宿主机宽裕时可用 --cpu=4000 --memory=4096 覆盖
+LABEL io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080],"probePort":49983,"probePath":"/health","writableLayerSize":"12G","cpu":2000,"memory":3072,"alias":"aio-computer","notes":"envd 49983 + AIO 网关 8080；Chromium 为 manual 模式"}' \
+      io.cubesandbox.template.exposed-ports="49983,8080" \
+      io.cubesandbox.template.probe-port="49983" \
+      io.cubesandbox.template.probe-path="/health" \
+      io.cubesandbox.template.writable-layer-size="12G" \
+      io.cubesandbox.template.cpu="2000" \
+      io.cubesandbox.template.memory="3072" \
+      io.cubesandbox.template.alias="aio-computer"

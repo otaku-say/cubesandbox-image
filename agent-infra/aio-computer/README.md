@@ -56,7 +56,19 @@ CI：push 到非 `main` 分支 → `Branch Build (test)`（构建 + 冒烟 + 推
 5. 能力抽查（browser / code_interpreter / **computer**）+ `/v2/commands`
 6. 打印镜像体积
 
-## 在 CubeSandbox 里注册模板
+## 在 CubeSandbox 里注册模板（默认值已写进镜像，免手填）
+
+镜像里带了 `io.cubesandbox.template.*` 标签，一条命令读出并直接建模板：
+
+```bash
+# 只看会提交什么（读 registry 里的镜像配置）
+cubesandbox-sdk-go tpl-from-image ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-computer:latest
+
+# 直接提交给平台（桌面偏重，宿主机宽裕时可 --cpu=4000 --memory=4096 覆盖）
+cubesandbox-sdk-go tpl-from-image ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-computer:latest --create
+```
+
+等价手工参数（与标签内容一致）：
 
 ```bash
 POST /templates
@@ -66,9 +78,14 @@ POST /templates
   "writableLayerSize": "12G",
   "exposedPorts": [49983, 8080],
   "probePort": 49983, "probePath": "/health",
-  "cpu": 4000, "memory": 4096
+  "cpu": 2000, "memory": 3072
 }
 ```
+
+> **标签约定**：`io.cubesandbox.template.defaults`（JSON 汇总）+ 单键 `exposed-ports` /
+> `probe-port` / `probe-path` / `writable-layer-size` / `cpu` / `memory` / `alias`。
+> 平台自身目前不读镜像标签（CubeTemplateCenter 源码明确省略这些字段），由
+> `cubesandbox-sdk-go tpl-from-image` 读出来把请求体填好。
 
 > 桌面镜像比 aio-daemon 重（XFCE + worker）；若宿主机内存紧张，可用 2C/3G 的小模板跑
 > （模板构建一次即可，与副本数无关）。
