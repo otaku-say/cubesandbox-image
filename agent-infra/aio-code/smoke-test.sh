@@ -50,7 +50,7 @@ printf '%s' "${out}" | grep -q "smoke-ok" && echo "  ✔ /v2/commands" || { echo
 curl -fsS -X POST http://127.0.0.1:18091/v1/bash/exec -H 'Content-Type: application/json' \
     -d '{"command":"echo v1-ok"}' | grep -q "v1-ok" && echo "  ✔ /v1/bash/exec"
 # 执行账户（base 以 root 运行，aiod 应同样以 root 执行命令）
-uid="$(printf '%s' "${out}" | grep -o 'UID=[0-9]*' | head -1 || true)"
+uid="$(printf '%s' "${out}" | grep -o 'UID=[0-9][0-9]*' | head -1 || true)"
 echo "  执行账户 ${uid:-UID=未捕获}（期望 UID=0）"
 
 echo "[4/6] 能力面（?refresh=true 强制新探测，绕开 5s 缓存）"
@@ -68,9 +68,22 @@ docker exec "${NAME}" /usr/local/bin/aiod doctor --json 2>&1 | head -c 800 | sed
 echo
 
 echo "[5/6] Jupyter(loopback) + 工具集"
-jcode="$(docker exec "${NAME}" curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8888/api/status || true)"
-echo "  jupyter 127.0.0.1:8888/api/status => ${jcode}（期望 200）"
-[ "${jcode}" = "200" ] || { echo "  ✘ Jupyter 未就绪" >&2; exit 1; }
+jcode=000
+for i in $(seq 1 60); do
+    jcode="$(docker exec "${NAME}" curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8888/api/status || true)"
+    [ "${jcode}" = "200" ] && break
+    sleep 1
+done
+echo "  jupyter 127.0.0.1:8888/api/status => ${jcode}（期望 200，等待 ${i}s）"
+if [ "${jcode}" != "200" ]; then
+    echo "  ✘ Jupyter 未就绪 —— 排障输出：" >&2
+    docker logs "${NAME}" 2>&1 | tail -n 30 >&2
+    echo "  ---- /var/log/jupyter.log ----" >&2
+    docker exec "${NAME}" tail -n 40 /var/log/jupyter.log 2>&1 >&2 || true
+    echo "  ---- 进程表 ----" >&2
+    docker exec "${NAME}" ps aux 2>&1 | head -n 20 >&2 || true
+    exit 1
+fi
 docker exec "${NAME}" bash -lc '
     set -e
     python3 -V
