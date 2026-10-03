@@ -32,4 +32,5 @@ ghcr.io/<owner>/cubesandbox-image/<org>/<project>:latest
 
 | 目录 | 产出 | 说明 |
 |---|---|---|
-| `agent-infra/sandbox` | `ghcr.io/<owner>/cubesandbox-image/agent-infra/sandbox:latest` | AIO Sandbox + envd 双通道（推荐主线基座） |
+| `agent-infra/sandbox` | `ghcr.io/<owner>/cubesandbox-image/agent-infra/sandbox:latest` | AIO Sandbox 1.x + envd 双通道（套壳上游发行镜像，功能最全，**API 仅 v1**） |
+| `agent-infra/aio-daemon` | `ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-daemon:latest` | AIO 2.x 官方发行镜像 + envd（**v1 + v2 双面**，含桌面/VNC，体积大） |

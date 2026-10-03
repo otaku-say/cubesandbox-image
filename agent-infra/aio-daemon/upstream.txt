@@ -1,0 +1,10 @@
+# envd 启动契约的来源（digest 变更会被 Track Upstream 检出）
+ghcr.io/tencentcloud/cubesandbox-base:latest
+
+# 上游 aio-daemon 镜像不在自动跟踪范围：它位于火山 Harbor（需 Harbor token 流程，
+# 且没有 latest 标签，只有 1.0.0 / 1.0.1[/-nydus]）。升级方式：
+#   1) 查标签：
+#      TOK=$(curl -s "https://enterprise-public-cn-beijing.cr.volces.com/service/token?service=harbor-registry&scope=repository:vefaas-public/aio-daemon:pull" | jq -r .token)
+#      curl -s -H "Authorization: Bearer $TOK" \
+#        "https://enterprise-public-cn-beijing.cr.volces.com/v2/vefaas-public/aio-daemon/tags/list"
+#   2) 改 Dockerfile 的 ARG AIO_DAEMON_TAG → 触发重建。
