@@ -21,9 +21,9 @@
 
 ```
 aio-daemon 1.0.1（上游整套）
-├── nginx 网关 :8080/:8091 ← 对外入口（转发到 aiod 18091 / computer-use 18100）
-│                           ⚠️ 文档写 8091、镜像 banner 指向 8080 —— 冒烟测试自动发现，
-│                           注册模板时把两个端口都 expose 最稳
+├── nginx 网关 :8080       ← 实测对外入口（转发到 aiod 18091 / computer-use 18100）
+│                           ⚠️ 官方文档写 8091，实测 1.0.1 监听的是 8080（容器内 banner
+│                           亦指向 8080）；8091 未监听。冒烟测试会自动发现端口归属
 ├── aiod :18091（loopback）← v1 + v2 双面 API
 ├── Chromium + VNC + 桌面与工具链（Python/Node/Go/uv/Jupyter/code-server…）
 └── 本次注入：envd :49983  ← E2B/CubeSandbox 数据面（tini + cube-entrypoint 契约）
@@ -54,34 +54,68 @@ CI：push 到非 `main` 分支 → `Branch Build (test)`（构建 + 冒烟 + 推
 4. 能力与功能：`browser` / `code_interpreter` 状态 + `/v2/commands`、`/v1/bash/exec` 实跑
 5. 打印镜像体积
 
-## 在 CubeSandbox 里注册模板
+## v2 API 全量测试（tests/）
+
+`tests/suite.py` 是覆盖 v2 OpenAPI（0.9.2，65 路径）的可重复测试套件，直接跑在沙箱网关基址上：
 
 ```bash
-# 平台侧（expose envd 49983 + nginx 8091；probe 用 envd，~1s 就绪）
+BASE="https://<cubesandbox-proxy-host>/sandbox/<sandboxID>/8080" python3 tests/suite.py
+```
+
+覆盖八个面：运维（/health、/v2/sandbox、/v2/sandbox/packages）、命令（同步/异步/stdin/kill/
+超时/输出截断/stdout-stderr 分流/offset 回读/session/shell 选择器）、文件（写读改查删拷移、
+行号读、grep、glob、multipart 上传 ↔ 下载 sha256 一致）、终端（建/exec/screen/input/signal/
+改尺寸/删）、监听（create/poll/list/delete）、代码（python/javascript/会话状态保持）、
+浏览器（info/navigate/截图 PNG/evaluate/snapshot/fill/click/标签页/cookie/网络日志/原生 CDP/
+真实站点导航）、MCP（initialize + tools/list，31 个工具）。
+
+**最近一次实测：87 通过 / 0 失败 / 1 跳过**（跳过项 = `/v2/computer/*` 返回 503，
+该镜像不含 computer-use worker，属预期）。
+
+实测出的 API 语义（写测试时按这些断言）：
+
+| 行为 | 实测结果 |
+|---|---|
+| 命令状态/退出码位置 | 在 `data.command.status` / `.exit_code`，不在 `data` 顶层 |
+| kill 后 | `status=completed`、`exit_code=-1`（不单独报告 signal） |
+| 命令会话 cwd | 固定在创建时的 `cwd`；会话内 `cd` **不**跨调用保留（每条命令仍是新进程） |
+| 超时 | `timeout=1` 时立即返回且 `status=running`（进程继续跑，需自行 kill） |
+| `/v2/sandbox/packages` | 返回**文本**清单（不是 JSON 数组）；`lang=py` 会 400，要用 `python`/`node` |
+| `/v2/fs/upload` | multipart，字段名 `file`，落在 `/tmp/<filename>` |
+| `/v2/browser/screenshot` | `format=png` 直接返回 PNG 字节流 |
+| `/v2/browser/snapshot` | 返回可访问性快照（带 ref），可配合 `click/fill` 的 `ref` 用 |
+
+## 在 CubeSandbox 里注册模板（实测参数）
+
+```bash
+# 平台侧（expose envd 49983 + 网关 8080；probe 用 envd，~1s 就绪）
 POST /templates
 {
   "name": "aio-daemon",
-  "image": "ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-daemon:latest",
-  "writableLayerSize": "16G",          # 上游镜像约 3GB 压缩，可写层给足
-  "exposedPorts": [49983, 8091],
+  "image": "ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-daemon:latest",   # 建议用 digest 固定
+  "writableLayerSize": "12G",          # 镜像解压后 7.4GB，可写层给足
+  "exposedPorts": [49983, 8080],
   "probePort": 49983, "probePath": "/health",
-  "cpu": 4000, "memory": 4096
+  "cpu": 4000, "memory": 6144
 }
 ```
+
+> 实测（2026-10-03）：模板构建约 12 分钟（7.4GB 镜像 pull + rootfs 分发）；
+> 沙箱创建后 envd `204` 约 4 秒、网关 `200` 约 4 秒可用。
 
 访问（数据面经网关路径路由，端口 = 容器内端口）：
 
 ```bash
 BASE="https://<cubesandbox-proxy-host>/sandbox/<sandboxID>"
-curl "$BASE/8091/v1/capabilities"          # AIO API（v1）
-curl "$BASE/8091/v2/sandbox"               # AIO API（v2）
+curl "$BASE/8080/v1/capabilities"          # AIO API（v1 兼容面）
+curl "$BASE/8080/v2/sandbox"               # AIO API（v2 原生面）
 curl -o /dev/null -w '%{http_code}\n' "$BASE/49983/health"   # envd → 204
 ```
 
 本地遥控 CLI 照旧：
 
 ```bash
-export SANDBOX_BASE="https://<cubesandbox-proxy-host>/sandbox/<sandboxID>/8091"
+export SANDBOX_BASE="https://<cubesandbox-proxy-host>/sandbox/<sandboxID>/8080"
 sandbox-sdk-go exec "id; uname -a"
 ```
 
