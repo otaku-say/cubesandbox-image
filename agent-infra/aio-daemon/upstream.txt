@@ -1,10 +1,9 @@
-# envd 启动契约的来源（digest 变更会被 Track Upstream 检出）
+# 三个上游之一：envd/tini/cube-entrypoint 的来源（digest 变更会被 Track Upstream 检出）
 ghcr.io/tencentcloud/cubesandbox-base:latest
 
-# 上游 aio-daemon 镜像不在自动跟踪范围：它位于火山 Harbor（需 Harbor token 流程，
-# 且没有 latest 标签，只有 1.0.0 / 1.0.1[/-nydus]）。升级方式：
-#   1) 查标签：
-#      TOK=$(curl -s "https://enterprise-public-cn-beijing.cr.volces.com/service/token?service=harbor-registry&scope=repository:vefaas-public/aio-daemon:pull" | jq -r .token)
-#      curl -s -H "Authorization: Bearer $TOK" \
-#        "https://enterprise-public-cn-beijing.cr.volces.com/v2/vefaas-public/aio-daemon/tags/list"
-#   2) 改 Dockerfile 的 ARG AIO_DAEMON_TAG → 触发重建。
+# 三个上游之二：aio-daemon 发行镜像本体（digest 变更 → 触发重建 + 开 issue）
+enterprise-public-cn-beijing.cr.volces.com/vefaas-public/aio-daemon:1.0.1
+
+# 说明：aiod 二进制由该镜像自带（Dockerfile 只管注入 envd）。
+# 该仓库没有 latest 标签：新版本由 track-upstream 工作流的「Harbor 新 tag 巡检」发现并开 issue，
+# 人工把 ARG AIO_DAEMON_TAG 改成新 tag 后即触发重建。

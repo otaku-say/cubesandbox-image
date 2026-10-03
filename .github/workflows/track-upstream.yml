@@ -32,7 +32,11 @@ jobs:
           while IFS= read -r src; do
             [ -z "$src" ] && continue
             name=$(echo "$src" | tr '/:' '__')
-            digest=$(docker buildx imagetools inspect "$src" --format '{{json .Manifest.Digest}}' | tr -d '"')
+            digest=$(docker buildx imagetools inspect "$src" --format '{{json .Manifest.Digest}}' | tr -d '"' || true)
+            if [ -z "$digest" ] || [ "$digest" = "null" ]; then
+              echo "!! 跳过 $src：无法获取 digest（仓库不可达/需鉴权），不写入不误报" >&2
+              continue
+            fi
             old=""; [ -f "upstream/$name.digest" ] && old=$(cat "upstream/$name.digest")
             if [ "$old" != "$digest" ]; then
               echo "$digest" > "upstream/$name.digest"; wrote=1
@@ -41,6 +45,43 @@ jobs:
           done <<< "$refs"
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
           echo "wrote=$wrote" >> "$GITHUB_OUTPUT"
+
+      - name: Harbor 新 tag 巡检（aio-daemon / aio-computer，两个仓库都没有 latest 标签）
+        id: harbor
+        run: |
+          set -euo pipefail
+          R=enterprise-public-cn-beijing.cr.volces.com
+          found=0
+          for repo in vefaas-public/aio-daemon vefaas-public/aio-computer; do
+            dir="agent-infra/${repo##*/}"
+            [ -f "$dir/Dockerfile" ] || continue
+            pinned=$(sed -nE 's/^ARG AIO_[A-Z]+_TAG=([^ ]+).*/\1/p' "$dir/Dockerfile" | head -1)
+            tok=$(curl -s "https://$R/service/token?service=harbor-registry&scope=repository:$repo:pull" | jq -r '.token // empty')
+            tags=$(curl -s -H "Authorization: Bearer $tok" "https://$R/v2/$repo/tags/list" | jq -r '.tags[]?' | grep -v -- '-nydus' | sort -V | tail -1)
+            echo "$dir: pinned=$pinned newest=$tags"
+            if [ -n "$tags" ] && [ "$tags" != "$pinned" ]; then
+              echo "$repo 有新 tag: $tags（当前固定 $pinned）" | tee -a /tmp/harbor-new.txt
+              found=1
+            fi
+          done
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+
+      - name: 开 issue 提醒升级 tag（Harbor）
+        if: steps.harbor.outputs.found == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "上游 aio-daemon/aio-computer 发布了新 tag $(date -u +%F)" \
+            --body "$(cat <<'EOF'
+          检测到火山仓库发布了新 tag（这两个仓库没有 latest 标签，无法自动跟 digest）：
+
+          $(cat /tmp/harbor-new.txt 2>/dev/null || true)
+
+          处理方式：把对应目录 Dockerfile 里的 `ARG AIO_DAEMON_TAG` / `ARG AIO_COMPUTER_TAG`
+          改成新 tag → push 到 main → CI 自动重建并推送 `:latest`。
+          EOF
+          )"
 
       - name: 提交 digest 变更
         if: steps.collect.outputs.wrote == '1'
