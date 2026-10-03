@@ -1,0 +1,6 @@
+# 上游一：官方代码执行环境（本镜像的 base；digest 变更 → 触发重建）
+cube-sandbox-cn.tencentcloudcr.com/cube-sandbox/sandbox-code:latest
+
+# 上游二：AIO Daemon 单文件二进制（版本固定在 Dockerfile 的 ARG AIOD_VERSION）
+#   每个发布目录 /v<version>/<platform>/ 提供 aiod 与 SHA256SUMS（构建时校验）
+https://aio-static.tos-cn-beijing.volces.com/v0.9.2/linux-x86_64/aiod
