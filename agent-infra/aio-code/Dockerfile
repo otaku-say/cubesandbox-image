@@ -79,9 +79,8 @@ RUN set -eux; \
     ln -sf /usr/local/bin/pip3 /usr/local/bin/pip; \
     python3 -V; pip --version
 
-# uv（从官方镜像取二进制；高速安装/venv/工具运行）
-ARG UV_VERSION=0.12.23
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /usr/local/bin/
+# uv（从官方镜像取二进制；高速安装/venv/工具运行；升级 = 改下面这行的 tag 并重建）
+COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /uvx /usr/local/bin/
 RUN uv --version
 
 # ---- 4) Node.js 24 LTS（官方 tarball，固定版本 + SHA256 校验） ---------------
