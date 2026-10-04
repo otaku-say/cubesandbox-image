@@ -1,31 +1,42 @@
-# agent-infra/aio-code —— 轻量代码沙箱（官方 sandbox-code + AIO Daemon）
+# agent-infra/aio-code —— 代码沙箱（cubesandbox-base + AIO Daemon）
 
-**定位**：小体积、覆盖日常多数场景（编辑文件 / 跑脚本 / 数据处理 / git / HTTP 抓取 /
-E2B 代码执行），**不带** Chromium / VNC / 桌面。
+**定位**：写代码 / 测试 / 编译 / 调试。轻量：**无**浏览器、**无**桌面、**无** Jupyter。
 需要浏览器 → [`agent-infra/aio-daemon`](../aio-daemon)；需要桌面 → [`agent-infra/aio-computer`](../aio-computer)。
 
 | 组成 | 来源 | 说明 |
 |---|---|---|
-| 基底 | `cube-sandbox-cn.tencentcloudcr.com/cube-sandbox/sandbox-code` | 官方代码执行环境，**已内置 envd**，E2B SDK 兼容；层合计仅 ~110MB |
-| aiod | `aio-static.tos-cn-beijing.volces.com/v0.9.2/linux-x86_64/aiod` | AIO Daemon 单文件（musl 静态），构建时按 SHA256SUMS 校验 |
+| 基底 | `ghcr.io/tencentcloud/cubesandbox-base` | Ubuntu 22.04 + **envd(49983)/tini/cube-entrypoint 原生契约**（压缩层 ~36MB） |
+| aiod | `aio-static.tos-cn-beijing.volces.com/v0.9.2/linux-x86_64/aiod` | AIO Daemon 单文件（musl 静态），构建时按 SHA256SUMS 校验；`AIO_PORT=8080` |
 
 ## 镜像内容与端口
 
 ```
 aio-code
-├── envd :49983             ← E2B/CubeSandbox 数据面（sandbox-code 原生自带）
-├── code-interpreter :49999 ← E2B 兼容的 uvicorn 服务（0.0.0.0）
-├── Jupyter Server :8888    ← 仅 127.0.0.1（aiod 经 AIO_JUPYTER_ENDPOINT 访问）
-├── aiod :18091             ← AIO Daemon，v1+v2 双面 API（AIO_PORT 可改）
-└── 工具: git curl jq ripgrep tmux procps vim-tiny tini nodejs（apt，--no-install-recommends）
+├── envd :49983   ← CubeSandbox/E2B 数据面（cubesandbox-base 原生）
+├── aiod :8080    ← AIO Daemon，v1+v2 双面 API（AIO_PORT=8080，与 aio-daemon 一致）
+└── 工具链（版本固定，升级改 Dockerfile ARG）
+    ├─ Python 3.12（唯一版本，默认 python3）+ pip + venv + uv
+    ├─ Node.js 24 LTS（v24.21.0）+ npm
+    ├─ Zig 0.17.0（我们 CLI 主语言；兼 C/C++ 应急编译 zig cc）
+    ├─ 日常：git / jq / yq / ripgrep / fd / tmux / vim / xxd / file / less / tree
+    │        diffutils / patch / zip / unzip / xz / zstd / bzip2 / rsync
+    │        openssh-client / wget / sqlite3 / openssl / gh
+    └─ 调试：shellcheck / gdb / strace / iproute2(ip,ss) / ping / nc
 ```
 
-启动链：`tini(PID1)` → `entrypoint-aio.sh`
-→ 后台跑原 `start-lightweight-code-interpreter.sh`（envd + Jupyter + 代码解释器），
-   前台受监管跑 `aiod start`；**任一进程退出 → 整体退出 → 平台重建**。
+启动链：base 的 `tini → cube-entrypoint.sh`（后台 envd + 前台 CMD + 信号转发），
+CMD = `aiod start`。
 
-能力口径（`cubesandbox-sdk-go tpl-caps --probe` 实测判定）：`shell,file,code`，
-**无 browser / desktop**（镜像里没有 Chromium 和 computer-use worker）。
+## 设计取舍（为什么这么轻）
+
+- **不装 Jupyter / code-interpreter**：用不到。`/v1/code`、`/v2/code` 有 python3/node
+  即正常工作，仅 `/v1/jupyter` 路由返回 501。
+- **不装系统 C/C++ 工具链**：Zig CLI 编译完全自包含；真要编 C，`zig cc` 直接可用
+  （已进冒烟测试），或沙箱内 `apt-get install build-essential` 临时装。
+- **网络调试工具收最小集**（ip/ss/ping/nc）：家庭网络排障类工具（tcpdump/dig）
+  需要时沙箱内 apt 临时装。
+- **版本全部固定**：Node/Zig/yq/gh/aiod……升级改对应 ARG，push 即触发重建。
+- **gdb 说明**：依赖 libpython3.10 运行库（仅共享库，不会出现 3.10 解释器）。
 
 ## 构建
 
@@ -33,9 +44,10 @@ aio-code
 ./build.sh              # 构建 + 冒烟测试
 ./build.sh --push       # 追加推送 :latest
 
-# 换 aiod 版本 / 换 base
+# 换版本：
 docker build --build-arg AIOD_VERSION=v0.9.1 -t aio-code:dev .
-docker build --build-arg BASE_IMAGE=... -t aio-code:dev .
+docker build --build-arg NODE_VERSION=v24.20.0  -t aio-code:dev .
+docker build --build-arg BASE_IMAGE=...         -t aio-code:dev .
 ```
 
 CI：push 到非 `main` 分支 → `Branch Build (test)`（构建 + 冒烟 + 推 `:test`）；
@@ -44,12 +56,14 @@ CI：push 到非 `main` 分支 → `Branch Build (test)`（构建 + 冒烟 + 推
 ## 冒烟测试覆盖
 
 1. envd `:49983/health` → **204**（与平台模板探针同口径）
-2. aiod `:18091/health` → 200，`/v1/capabilities` + `/v2/sandbox` 双面齐
+2. aiod `:8080/health` → 200，`/v1/capabilities` + `/v2/sandbox` 双面齐；
+   且 **18091 不再监听**（端口已统一到 8080）
 3. 执行面：`/v2/commands`、`/v1/bash/exec`，并核对执行账户（root=0）
-4. 能力面：`/v1/capabilities?refresh=true`（绕开 5s 缓存）核对
-   code_interpreter=ready、browser/computer=无；`aiod doctor --json` 自检 bash/rg/tmux
-5. Jupyter `127.0.0.1:8888/api/status` → 200 + 工具集（python3/node/git/jq/rg/tmux/aiod）
-6. 打印镜像体积
+4. 能力面：`/v1/capabilities?refresh=true` 输出 code_interpreter/browser/computer 状态
+5. 工具链：python3=3.12（且无其他解释器版本）、node=24、zig=0.17.0、venv、shellcheck
+   正/负样例、**zig cc 编译 C 并运行**、strace/gdb 实跑、aiod doctor
+6. 端口：ss 确认 49983 + 8080 在监听
+7. 打印镜像体积
 
 ## 在 CubeSandbox 里注册模板（默认值已写进镜像，免手填）
 
@@ -67,7 +81,7 @@ POST /templates
   "name": "aio-code",
   "image": "ghcr.io/otaku-say/cubesandbox-image/agent-infra/aio-code:latest",
   "writableLayerSize": "10G",
-  "exposedPorts": [49983, 49999, 18091],
+  "exposedPorts": [49983, 8080],
   "probePort": 49983, "probePath": "/health",
   "cpu": 2000, "memory": 3072
 }
@@ -79,21 +93,17 @@ POST /templates
 # 平台数据面（经网关路径路由，端口 = 容器内端口）
 BASE="https://<cubesandbox-proxy-host>/sandbox/<sandboxID>"
 curl -o /dev/null -w '%{http_code}\n' "$BASE/49983/health"     # envd → 204
-curl "$BASE/18091/health"                                       # aiod → 200
-curl "$BASE/18091/v2/commands" -X POST -H 'Content-Type: application/json' -d '{"command":"uname -a"}'
+curl "$BASE/8080/health"                                        # aiod → 200
+curl "$BASE/8080/v2/commands" -X POST -H 'Content-Type: application/json' -d '{"command":"uname -a"}'
 
-# E2B SDK（官方 sandbox-code 兼容面不变）
-# 代码执行走 49999；envd 走 49983
+# sandbox-sdk-go 直接对接（SANDBOX_BASE 指到 /8080）
 ```
 
-## 取舍与边界
+## 升级路径（常见改动）
 
-- **为什么不用官方 aiod 镜像**：官方 `aio-daemon/aio-computer` 是全家桶（7.4GB，含
-  Chromium/VNC/桌面），日常"改文件/跑脚本/抓数据"用不到，且拉取/构建慢、占磁盘。
-  本镜像 ~110MB 基底 + 工具，构建快、拉取快。
-- **浏览器/桌面刻意不带**：要就换模板（`new --need=browser/desktop` 会自动挑）。
-- **Jupyter 只在 loopback**：`AIO_JUPYTER_ENDPOINT=http://127.0.0.1:8888` 让 aiod
-  的 `/v1/jupyter` 可用；外部如需直连 Jupyter，自行改 `JUPYTER_HOST=0.0.0.0` 并暴露 8888。
-- **aiod 未配 API key**：走平台边缘鉴权；若把 18091 暴露到公网，自行设置 `AIO_API_KEY`。
-- **版本固定**：`AIOD_VERSION=v0.9.2`（可复现构建）；升版改 ARG 即触发重建。
-  `latest/<platform>/aiod` 始终是最新稳定版，想追新可改 URL。
+| 要改什么 | 改哪里 |
+|---|---|
+| aiod 版本 | Dockerfile `ARG AIOD_VERSION`（track-upstream 有新版巡检会自动开 issue） |
+| Node / Zig / yq / gh | 对应 `ARG *_VERSION`（Zig 校验值自动从 index.json 取） |
+| Python 版本 | deadsnakes 包名 `python3.12` → 新版本（并同步 python3/python 软链） |
+| 临时装工具 | 沙箱内直接 `apt-get install` / `uv tool` / `npm -g`（有网，秒级） |

@@ -1,7 +1,7 @@
-# 上游一：官方代码执行环境（本镜像的 base；digest 变更 → 触发重建）
-cube-sandbox-cn.tencentcloudcr.com/cube-sandbox/sandbox-code:latest
+# 上游一：CubeSandbox 官方基础镜像（envd/tini/cube-entrypoint 原生契约；digest 变更 → 触发重建）
+ghcr.io/tencentcloud/cubesandbox-base:latest
 
 # 上游二：AIO Daemon 单文件二进制（版本固定在 Dockerfile 的 ARG AIOD_VERSION）
 #   发布物不可变，无需 digest 跟踪；新版本巡检由 track-upstream 的「aiod 新版本巡检」负责
 #   （比对 latest/linux-x86_64/SHA256SUMS 与固定版本的校验值，不一致就开 issue）
-# https://aio-static.tos-cn-beijing.volces.com/v0.9.2/linux-x86_64/aiod
+#   https://aio-static.tos-cn-beijing.volces.com/v0.9.2/linux-x86_64/aiod

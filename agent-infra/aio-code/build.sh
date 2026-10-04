@@ -8,9 +8,8 @@ cd "$(dirname "$0")"
 IMAGE="${IMAGE:-ghcr.io/otaku-say/cubesandbox-image/agent-infra/aio-code:latest}"
 LOCAL_TAG="csi-test/agent-infra/aio-code:test"
 
-# base 来自腾讯云官方仓库（公开，匿名可拉）
-#   docker login cube-sandbox-cn.tencentcloudcr.com   # 如遇限流再配
-# aiod 来自 aio-static 公开 CDN（构建时按 SHA256SUMS 校验）
+# base 来自 GHCR 官方（公开，匿名可拉）；aiod / Node / Zig / yq / gh 等
+# 均来自公开 CDN 或 GitHub Releases（构建时校验 SHA256）
 
 docker build -t "${LOCAL_TAG}" .
 bash ./smoke-test.sh "${LOCAL_TAG}"
