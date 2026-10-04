@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# 本机构建 / 冒烟 / 推送（CI 会自动做同样的事；本脚本用于本地或控制节点）
-#   ./build.sh            构建 + 冒烟测试
-#   ./build.sh --push     构建 + 冒烟测试 + 推送 :latest
+# =============================================================================
+# 镜像构建与本地冒烟测试脚本
+# 用法:
+#   ./build.sh            构建本地测试镜像并执行冒烟测试
+#   ./build.sh --push     构建、冒烟测试并推送到 GHCR
+# =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")"
 
 IMAGE="${IMAGE:-ghcr.io/otaku-say/cubesandbox-image/agent-infra/aio-code:latest}"
 LOCAL_TAG="csi-test/agent-infra/aio-code:test"
 
-# base 来自 GHCR 官方（公开，匿名可拉）；aiod / Node / Zig / yq / gh 等
-# 均来自公开 CDN 或 GitHub Releases（构建时校验 SHA256）
-
+echo "== [1/2] 开始构建 Docker 镜像 =="
 docker build -t "${LOCAL_TAG}" .
+
+echo "== [2/2] 执行冒烟测试 =="
 bash ./smoke-test.sh "${LOCAL_TAG}"
 
 if [ "${1:-}" = "--push" ]; then
+    echo "== 推送至目标镜像仓库 =="
     docker tag "${LOCAL_TAG}" "${IMAGE}"
     docker push "${IMAGE}"
     echo "✔ 已推送 ${IMAGE}"
 else
-    echo "✔ 本地镜像就绪：${LOCAL_TAG}（加 --push 可推送到 ${IMAGE}）"
+    echo "✔ 本地镜像就绪且测试通过：${LOCAL_TAG}（带 --push 可推送）"
 fi
