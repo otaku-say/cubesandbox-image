@@ -87,11 +87,11 @@ RUN uv --version
 ARG NODE_VERSION=v24.21.0
 RUN set -eux; \
     base="https://nodejs.org/dist/${NODE_VERSION}"; \
-    curl -fsSL "${base}/node-${NODE_VERSION}-linux-x64.tar.xz" -o /tmp/node.tar.xz; \
+    curl -fsSL "${base}/node-${NODE_VERSION}-linux-x64.tar.xz" -o "/tmp/node-${NODE_VERSION}-linux-x64.tar.xz"; \
     curl -fsSL "${base}/SHASUMS256.txt" -o /tmp/node-SHASUMS256.txt; \
     grep -E "[[:space:]]node-${NODE_VERSION}-linux-x64[.]tar[.]xz$" /tmp/node-SHASUMS256.txt | (cd /tmp && sha256sum -c -); \
-    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
-    rm -f /tmp/node.tar.xz /tmp/node-SHASUMS256.txt; \
+    tar -xJf "/tmp/node-${NODE_VERSION}-linux-x64.tar.xz" -C /usr/local --strip-components=1 --no-same-owner; \
+    rm -f "/tmp/node-${NODE_VERSION}-linux-x64.tar.xz" /tmp/node-SHASUMS256.txt; \
     node -v; npm -v
 
 # ---- 5) Zig 0.17.0（官方 tarball，构建时从 index.json 取 SHA256 校验） ------
@@ -121,12 +121,12 @@ RUN set -eux; \
 ARG GH_VERSION=2.102.0
 RUN set -eux; \
     base="https://github.com/cli/cli/releases/download/v${GH_VERSION}"; \
-    curl -fsSL "${base}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tar.gz; \
+    curl -fsSL "${base}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o "/tmp/gh_${GH_VERSION}_linux_amd64.tar.gz"; \
     curl -fsSL "${base}/gh_${GH_VERSION}_checksums.txt" -o /tmp/gh-checksums.txt; \
     grep -E "[[:space:]]gh_${GH_VERSION}_linux_amd64[.]tar[.]gz$" /tmp/gh-checksums.txt | (cd /tmp && sha256sum -c -); \
-    tar -xzf /tmp/gh.tar.gz -C /tmp; \
+    tar -xzf "/tmp/gh_${GH_VERSION}_linux_amd64.tar.gz" -C /tmp; \
     install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh; \
-    rm -rf /tmp/gh.tar.gz /tmp/gh-checksums.txt "/tmp/gh_${GH_VERSION}_linux_amd64"; \
+    rm -rf "/tmp/gh_${GH_VERSION}_linux_amd64.tar.gz" /tmp/gh-checksums.txt "/tmp/gh_${GH_VERSION}_linux_amd64"; \
     gh --version
 
 # ---- 7) 运行参数、端口、探针、模板默认值 ------------------------------------
