@@ -44,7 +44,7 @@
 aio-code (运行时基础内存 ~80MB)
 ├── envd :49983   ← CubeSandbox / E2B 平台探针与数据面通道
 ├── aiod :8080    ← AIO Daemon，/v1 + /v2 双面 API（AIO_PORT=8080）
-└── 工具链（版本全部固定，升级改 Dockerfile ARG）
+└── 工具链（固定最新LTS版本，升级改 Dockerfile ARG）
     ├─ Python 3.12（deadsnakes 唯一版本）+ dev 头文件 + pip + uv（单文件/测试环境秒级运行）
     ├─ Zig 0.17.0（主开发语言；自带 cc / c++ 封装软链，可作为 C 编译器使用）
     ├─ 文本与文档：bat（语法高亮与行号查看）/ vim-tiny / less / tree / ripgrep / fd
