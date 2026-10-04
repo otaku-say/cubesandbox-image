@@ -109,4 +109,40 @@ cubesandbox-sdk-go tpl-from-image ghcr.io/otaku-say/cubesandbox-image/agent-infr
 POST /templates
 {
   "name": "aio-code",
-  "image": "ghcr.
+  "image": "ghcr.io/otaku-say/cubesandbox-image/agent-infra/aio-code:latest",
+  "writableLayerSize": "10G",
+  "exposedPorts": [49983, 8080],
+  "probePort": 49983,
+  "probePath": "/health",
+  "cpu": 2000,
+  "memory": 2048
+}
+```
+
+---
+
+## Agent 作业参考流程
+
+沙箱创建后，Agent 在沙箱中执行版本升级与镜像发版的标准闭环：
+
+```bash
+# 1. 阅读文档与改动对比
+bat -n Dockerfile
+git diff
+
+# 2. 检查脚本规范
+shellcheck smoke-test.sh build.sh
+
+# 3. 提交代码并推送（由 GitHub Actions 负责构建）
+git add Dockerfile
+git commit -m "chore: 升级 Zig 编译器版本"
+git push origin main
+
+# 4. 监听 GitHub Actions 构建进度
+gh run watch --exit-status
+
+# 5. 若构建异常，提取失败日志进行自愈修复
+if [ $? -ne 0 ]; then
+  gh run view --log-failed
+fi
+```
