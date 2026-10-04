@@ -1,109 +1,112 @@
-# agent-infra/aio-code —— 代码沙箱（cubesandbox-base + AIO Daemon）
+# agent-infra/aio-code —— 轻量代码沙箱（cubesandbox-base + AIO Daemon）
 
-**定位**：写代码 / 测试 / 编译 / 调试。轻量：**无**浏览器、**无**桌面、**无** Jupyter。
-需要浏览器 → [`agent-infra/aio-daemon`](../aio-daemon)；需要桌面 → [`agent-infra/aio-computer`](../aio-computer)。
+**定位**：专为自动化 Agent 打造的低内存（<2GB RAM 配额）、通用性开发与调试沙箱。  
+**特性**：**无** Node.js、**无** 浏览器、**无** 桌面、**无** Jupyter。纯净高效，常驻内存仅 ~80MB。
 
 | 组成 | 来源 | 说明 |
 |---|---|---|
-| 基底 | `ghcr.io/tencentcloud/cubesandbox-base` | Ubuntu 22.04 + **envd(49983)/tini/cube-entrypoint 原生契约**（压缩层 ~36MB） |
-| aiod | `aio-static.tos-cn-beijing.volces.com/v0.9.2/linux-x86_64/aiod` | AIO Daemon 单文件（musl 静态），构建时按 SHA256SUMS 校验；`AIO_PORT=8080` |
+| 基底 | `ghcr.io/tencentcloud/cubesandbox-base` | Ubuntu 22.04 + **envd(49983)/tini/cube-entrypoint 原生启动契约** |
+| aiod | `aio-static.tos-cn-beijing.volces.com/v0.9.2/linux-x86_64/aiod` | AIO Daemon 单文件守护进程（musl 静态），构建时按 SHA256SUMS 校验；`AIO_PORT=8080`，提供 `/v1` 与 `/v2` 双面 API |
+
+---
+
+## 架构拓扑：本地遥控 + 云端沙箱 + GitHub Actions CI
+
+本环境采用三层协作设计，彻底杜绝沙箱内部运行 Docker-in-Docker（DinD）导致的 OOM 风险：
+
+```
+┌──────────────────┐      HTTP / RPC      ┌───────────────────────────────────┐
+│  本地 iSH (iOS)   │ ──────────────────> │   云端 OpenMinis + CubeSandbox    │
+│   [轻量遥控器]    │                     │   [Agent 执行车间 (2GB 内存配额)] │
+└──────────────────┘                     └─────────────────┬─────────────────┘
+  • 发送任务意图，不跑任务                                   │
+  • 不拉取代码，不装依赖                                     │ 1. 检视代码、改写 Dockerfile
+                                                           │ 2. git push / gh 触发 Actions
+                                                           │ 3. gh run watch 监听构建日志
+                                                           ▼
+                                         ┌───────────────────────────────────┐
+                                         │         GitHub Actions CI         │
+                                         │     [7GB+ 内存 Runner 云端构建]    │
+                                         └─────────────────┬─────────────────┘
+                                                           │ docker buildx
+                                                           │ push image
+                                                           ▼
+                                         ┌───────────────────────────────────┐
+                                         │       ghcr.io 容器镜像仓库        │
+                                         └───────────────────────────────────┘
+```
+
+---
 
 ## 镜像内容与端口
 
 ```
-aio-code
-├── envd :49983   ← CubeSandbox/E2B 数据面（cubesandbox-base 原生）
-├── aiod :8080    ← AIO Daemon，v1+v2 双面 API（AIO_PORT=8080，与 aio-daemon 一致）
-└── 工具链（版本固定，升级改 Dockerfile ARG）
-    ├─ Python 3.12（唯一版本，默认 python3）+ pip + venv + uv
-    ├─ Node.js 24 LTS（v24.21.0）+ npm
-    ├─ Zig 0.17.0（我们 CLI 主语言；兼 C/C++ 应急编译 zig cc）
-    ├─ 日常：git / jq / yq / ripgrep / fd / tmux / vim / xxd / file / less / tree
-    │        diffutils / patch / zip / unzip / xz / zstd / bzip2 / rsync
-    │        openssh-client / wget / sqlite3 / openssl / gh
-    └─ 调试：shellcheck / gdb / strace / iproute2(ip,ss) / ping / nc
+aio-code (运行时基础内存 ~80MB)
+├── envd :49983   ← CubeSandbox / E2B 平台探针与数据面通道
+├── aiod :8080    ← AIO Daemon，/v1 + /v2 双面 API（AIO_PORT=8080）
+└── 工具链（版本全部固定，升级改 Dockerfile ARG）
+    ├─ Python 3.12（deadsnakes 唯一版本）+ dev 头文件 + pip + uv（单文件/测试环境秒级运行）
+    ├─ Zig 0.17.0（主开发语言；自带 cc / c++ 封装软链，可作为 C 编译器使用）
+    ├─ 文本与文档：bat（语法高亮与行号查看）/ vim-tiny / less / tree / ripgrep / fd
+    ├─ 远端调度：gh（GitHub CLI）/ git（内置 256M 内存限制与 safe.directory）/ yq / jq
+    ├─ 编译依赖：make / pkg-config / libssl-dev / zlib1g-dev / diffutils / patch
+    └─ 网络与调试：socat / netcat / rsync / openssh-client / sqlite3 / shellcheck / strace
 ```
 
-启动链：base 的 `tini → cube-entrypoint.sh`（后台 envd + 前台 CMD + 信号转发），
-CMD = `aiod start`。
+启动链路：base 镜像自带的 `tini → cube-entrypoint.sh`（后台运行 envd + 前台执行 CMD 并做信号转发），`CMD = ["/usr/local/bin/aiod", "start"]`。
 
-## 设计取舍（为什么这么轻）
+---
 
-- **不装 Jupyter / code-interpreter**：用不到。`/v1/code`、`/v2/code` 有 python3/node
-  即正常工作，仅 `/v1/jupyter` 路由返回 501。
-- **不装系统 C/C++ 工具链**：Zig CLI 编译完全自包含；真要编 C，`zig cc` 直接可用
-  （已进冒烟测试），或沙箱内 `apt-get install build-essential` 临时装。
-- **网络调试工具收最小集**（ip/ss/ping/nc）：家庭网络排障类工具（tcpdump/dig）
-  需要时沙箱内 apt 临时装。
-- **版本全部固定**：Node/Zig/yq/gh/aiod……升级改对应 ARG，push 即触发重建。
-- **gdb 说明**：依赖 libpython3.10 运行库（仅共享库，不会出现 3.10 解释器）。
+## 设计取舍与低内存防御（<2GB 优化）
 
-## 构建
+1. **移除 Node.js 全家桶**：彻底移除 V8 引擎运行时，消除单次前端构建吃满 1.5GB 内存的隐患，释放约 150MB 磁盘空间与 ~100MB 运行内存。
+2. **移除交互式 GDB**：避免拉取 Python 3.10 动态共享库；底层故障排查与系统调用追踪完全由轻量的 `strace` 与 Zig 自带 Panic 追踪覆盖。
+3. **Glibc 防碎片**：全局设定 `MALLOC_ARENA_MAX=2`，在多核宿主机上大幅削减多线程内存池碎片。
+4. **Git 打包防暴毙**：配置 `pack.windowMemory="256m"` 与 `pack.threads="2"`，防止拉取大型仓库时内存毛刺冲垮容器。
+5. **并发控制**：全局设置 `MAKEFLAGS="-j2"` 与 `UV_CONCURRENT_INSTALLS=2`，防止多核宿主机并发任务打满 2GB 内存。
+
+---
+
+## 本地构建与冒烟测试
+
+本地仅用于快速验证 Dockerfile 语义和产物连通性：
 
 ```bash
-./build.sh              # 构建 + 冒烟测试
-./build.sh --push       # 追加推送 :latest
+# 构建本地镜像并执行完整冒烟测试（含 aiod、探针、编译测试、工具链检测）
+./build.sh
 
-# 换版本：
-docker build --build-arg AIOD_VERSION=v0.9.1 -t aio-code:dev .
-docker build --build-arg NODE_VERSION=v24.20.0  -t aio-code:dev .
-docker build --build-arg BASE_IMAGE=...         -t aio-code:dev .
+# 测试通过后推送到 GHCR（需本地具备写入权限）
+./build.sh --push
 ```
 
-CI：push 到非 `main` 分支 → `Branch Build (test)`（构建 + 冒烟 + 推 `:test`）；
-合入 `main` 后由 `Build Images` 推 `:latest`。
+### 冒烟测试覆盖范围（7 项验证）
+1. `envd :49983/health` 响应 204
+2. `aiod :8080/health` 响应 200，且 `/v1/capabilities` 与 `/v2/sandbox` 双面就绪（旧端口 18091 确认未监听）
+3. 命令执行面：`/v2/commands` 与 `/v1/bash/exec` 正确执行且 UID 为 0
+4. 能力面：`/v1/capabilities?refresh=true` 确认 code_interpreter 正确，无冗余桌面组件
+5. 工具链实跑：
+   - Python 3.12 唯一性及头文件
+   - `uv` 动态加载 pytest 临时测试运行
+   - `cc` 符号软链成功包装 `zig cc` 编译并执行 C 产物
+   - `bat`、`socat`、`pkg-config`、`shellcheck` 语法断言
+   - 确认无残留 `node` 二进制
+6. 端口监听：`ss -tln` 确认 49983 和 8080 正常开放
+7. 镜像体积统计输出
 
-## 冒烟测试覆盖
+---
 
-1. envd `:49983/health` → **204**（与平台模板探针同口径）
-2. aiod `:8080/health` → 200，`/v1/capabilities` + `/v2/sandbox` 双面齐；
-   且 **18091 不再监听**（端口已统一到 8080）
-3. 执行面：`/v2/commands`、`/v1/bash/exec`，并核对执行账户（root=0）
-4. 能力面：`/v1/capabilities?refresh=true` 输出 code_interpreter/browser/computer 状态
-5. 工具链：python3=3.12（且无其他解释器版本）、node=24、zig=0.17.0、venv、shellcheck
-   正/负样例、**zig cc 编译 C 并运行**、strace/gdb 实跑、aiod doctor
-6. 端口：ss 确认 49983 + 8080 在监听
-7. 打印镜像体积
+## 注册 CubeSandbox 模板
 
-## 在 CubeSandbox 里注册模板（默认值已写进镜像，免手填）
+镜像内标签 `io.cubesandbox.template.*` 已固化推荐规格，可使用 SDK 直接导入：
 
 ```bash
-# 一条命令读出镜像自带的默认值并直接建模板
 cubesandbox-sdk-go tpl-from-image ghcr.io/otaku-say/cubesandbox-image/agent-infra/aio-code:latest --create
-#（或不带 --create 打印请求体 / --curl 输出可执行 curl）
 ```
 
-等价手工参数（与 `io.cubesandbox.template.*` 标签一致）：
+手工注册 API 参数（2GB 内存契约）：
 
 ```json
 POST /templates
 {
   "name": "aio-code",
-  "image": "ghcr.io/otaku-say/cubesandbox-image/agent-infra/aio-code:latest",
-  "writableLayerSize": "10G",
-  "exposedPorts": [49983, 8080],
-  "probePort": 49983, "probePath": "/health",
-  "cpu": 2000, "memory": 3072
-}
-```
-
-## 使用
-
-```bash
-# 平台数据面（经网关路径路由，端口 = 容器内端口）
-BASE="https://<cubesandbox-proxy-host>/sandbox/<sandboxID>"
-curl -o /dev/null -w '%{http_code}\n' "$BASE/49983/health"     # envd → 204
-curl "$BASE/8080/health"                                        # aiod → 200
-curl "$BASE/8080/v2/commands" -X POST -H 'Content-Type: application/json' -d '{"command":"uname -a"}'
-
-# sandbox-sdk-go 直接对接（SANDBOX_BASE 指到 /8080）
-```
-
-## 升级路径（常见改动）
-
-| 要改什么 | 改哪里 |
-|---|---|
-| aiod 版本 | Dockerfile `ARG AIOD_VERSION`（track-upstream 有新版巡检会自动开 issue） |
-| Node / Zig / yq / gh | 对应 `ARG *_VERSION`（Zig 校验值自动从 index.json 取） |
-| Python 版本 | deadsnakes 包名 `python3.12` → 新版本（并同步 python3/python 软链） |
-| 临时装工具 | 沙箱内直接 `apt-get install` / `uv tool` / `npm -g`（有网，秒级） |
+  "image": "ghcr.
