@@ -8,7 +8,7 @@ alpine:3.21.0
 #   （scripts/install.sh、scripts/update.sh、SHA256SUMS.amd64、DOCS.sha256）→ 重新构建。
 # AIOD_VERSION：aio-static.tos-cn-beijing.volces.com 上的版本（见 Dockerfile ARG）
 #   升级流程：改 ARG → 重建；哈希与完整性由镜像内 SHA256SUMS 校验兜底。
-# aiod 专用 tmux（fetch-tmux.sh）：
-#   来源 = alpine v3.21 官方仓库（与基础镜像同仓库）；
-#   升级流程：从 APKINDEX 取新版本号 → 更新 3 个包文件名与 SHA256 → 复测 aiod 探测。
-#   注意：tmux 3.7 起 list-keys 行为变更会破坏 aiod 探测（3.5a/3.6 兼容），勿直升新版本。
+# aiod 专用 tmux（本目录 aiod-tmux-3.8rc3-x86_64-static，纯静态单文件）：
+#   来源 = 本仓库构建产物（alpine v3.21 容器 + zig 0.18-dev 静态编译；完整配方见 BUILD-NOTES.md）
+#   升级流程：正式 3.8 发布后按 BUILD-NOTES.md 重编 → 替换二进制 → 更新 Dockerfile 内嵌 SHA256 → 重建
+#   注意：tmux 3.7 存在 list-keys 回归会破坏 aiod 探测（3.5a/3.6 正常、3.8-rc3 已修复）。

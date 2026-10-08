@@ -90,7 +90,9 @@ if kill -0 "$tp" 2>/dev/null; then echo "  ✘ tini 未响应 TERM" >&2; exit 1;
 echo "  ✔ tini 存活 → TERM → 退出（信号转发链路正常）"
 '
 
-echo "== [7/9] aiod shell 后端断言（aiod 专用 tmux 3.5a） =="
+echo "== [7/9] aiod shell 后端断言（aiod 专用 tmux 3.8） =="
+docker exec "${NAME}" /usr/local/libexec/aiod-tmux/tmux -V | grep -q "3\.8" || { echo "  ✘ 专用 tmux 版本异常" >&2; exit 1; }
+echo "  ✔ aiod 专用 tmux = $(docker exec "${NAME}" /usr/local/libexec/aiod-tmux/tmux -V)"
 tmux_ok=0
 for _ in $(seq 1 20); do
   if docker logs "${NAME}" 2>&1 | grep -q '"selected":"tmux"'; then tmux_ok=1; break; fi

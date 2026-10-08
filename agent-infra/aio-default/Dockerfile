@@ -1,12 +1,14 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# aio-default —— 与本地 iSH 同源的 Alpine 沙箱镜像（v2）
+# aio-default —— 与本地 iSH 同源的 Alpine 沙箱镜像（v3）
 #
-# v2 变更（2026-10-08）：
-#   1. 系统 /bin/busybox 切换为工具箱完整版 1.38.0（408 applet；原系统版 304）
-#      —— 实测：apk / shell / 常用 applet / 服务链路全兼容，可随时改回
-#   2. aiod 专用 tmux 3.5a 装配（tmux 3.7 起 list-keys 行为变更破坏 aiod 探测；
-#      3.5a/3.6 实测兼容、3.7c 不兼容且官方编译与自编译行为一致）—— 替代 v1 兼容 shim
+# v3 变更（2026-10-08）：
+#   1. aiod 专用 tmux 升级为 **3.8-rc3 纯静态单文件**（zig 0.18-dev 编译；
+#      实测 3.8 修复了 3.7 的 list-keys 回归 → aiod 原生兼容，无需 shim/降级）
+#      —— 替代 v2 的 3.5a 动态装配（.so 搬运 + patchelf）；构建更简、形态更净
+#
+# v2 变更（保留）：
+#   2. 系统 /bin/busybox 切换为工具箱完整版 1.38.0（408 applet；原系统版 304）
 #
 # 设计原则（v1 起不变）：
 #   1. 基础镜像 = Alpine 3.21.0，与本地 iSH 完全同版本（仅 CPU 架构不同：amd64）
@@ -17,12 +19,6 @@
 #      /opt/bin、/root/workspace、PATH 与 iSH 完全相同
 # =============================================================================
 ARG BASE_IMAGE=alpine:3.21.0
-
-# ---- 0) aiod 专用 tmux 3.5a 装配（builder 阶段；详见 fetch-tmux.sh）----
-FROM alpine:3.21.0 AS tmux-builder
-RUN apk add --no-cache patchelf
-COPY fetch-tmux.sh /tmp/fetch-tmux.sh
-RUN sh /tmp/fetch-tmux.sh
 
 FROM ${BASE_IMAGE}
 
@@ -70,10 +66,14 @@ RUN set -eux; \
     ln -sf /opt/skills/tools/python3/amd64/python3 /usr/local/bin/python; \
     mkdir -p /opt/bin /root/workspace
 
-# ---- 6) aiod 专用 tmux 3.5a（装配产物；仅经 AIO_TMUX_BIN 供 aiod 使用）----
-COPY --from=tmux-builder /out/aiod-tmux /usr/local/libexec/aiod-tmux
-RUN /usr/local/libexec/aiod-tmux/tmux -V \
- && /opt/skills/tools/tmux/amd64/tmux -V
+# ---- 6) aiod 专用 tmux 3.8-rc3（纯静态单文件；zig 0.18-dev 编译，构建配方见 BUILD-NOTES.md）
+#        —— 仅经 AIO_TMUX_BIN 供 aiod 使用；用户/工具箱 tmux 3.7c 不受影响 ----
+COPY aiod-tmux-3.8rc3-x86_64-static /usr/local/libexec/aiod-tmux/tmux
+RUN set -eux; \
+    chmod 0755 /usr/local/libexec/aiod-tmux/tmux; \
+    echo "ec334bab3b16fdf201b8df07bb94264f5ae4dd97424e430a2b702184c705a33a  /usr/local/libexec/aiod-tmux/tmux" | sha256sum -c -; \
+    /usr/local/libexec/aiod-tmux/tmux -V; \
+    /opt/skills/tools/tmux/amd64/tmux -V
 
 # ---- 7) 环境变量（PATH 与 iSH 完全一致；ENVD/AIO 变量与官方 base / aio-code 对齐）----
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin \
@@ -94,7 +94,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cube-entrypoint.sh"]
 CMD ["/usr/local/bin/aiod", "start"]
 
 LABEL org.opencontainers.image.title="CubeSandbox code sandbox (aio-default)" \
-      org.opencontainers.image.description="iSH 同源极简沙箱：Alpine 3.21.0 + busybox 1.38 + ish-toolbox 46 件静态工具 + envd/aiod；零 apk 软件" \
+      org.opencontainers.image.description="iSH 同源极简沙箱：Alpine 3.21.0 + busybox 1.38 + ish-toolbox 46 件静态工具 + envd/aiod（tmux 3.8-rc3 静态）；零 apk 软件" \
       org.opencontainers.image.source="https://github.com/otaku-say/cubesandbox-image" \
       io.cubesandbox.envd.ref="native (portable; envd copied from cubesandbox-base)" \
       io.cubesandbox.toolbox.ref="otaku-say/skills@c6a7f163c69fc97f92dabb27ec7d1d9c871586fa" \
