@@ -48,7 +48,8 @@ set -eu
 for f in /bin/bash /usr/bin/python3 /usr/bin/tini /usr/local/bin/aiod /usr/local/bin/curl; do
   [ -x "$f" ] || { echo "$f 缺失" >&2; exit 1; }
 done
-echo "  ✔ alpine=$(cat /etc/alpine-release) / PATH 与 iSH 一致 / 关键入口齐全"
+/bin/busybox | head -1 | grep -q "v1.38.0" || { echo "系统 busybox 未切换为 1.38.0: $(/bin/busybox | head -1)" >&2; exit 1; }
+echo "  ✔ alpine=$(cat /etc/alpine-release) / PATH 与 iSH 一致 / 关键入口齐全 / busybox 1.38.0"
 printf "  · bash=%s\n" "$(bash --version | head -1)"
 printf "  · python3=%s\n" "$(python3 -V)"
 '
@@ -89,7 +90,7 @@ if kill -0 "$tp" 2>/dev/null; then echo "  ✘ tini 未响应 TERM" >&2; exit 1;
 echo "  ✔ tini 存活 → TERM → 退出（信号转发链路正常）"
 '
 
-echo "== [7/9] aiod shell 后端断言（tmux 兼容桥生效） =="
+echo "== [7/9] aiod shell 后端断言（aiod 专用 tmux 3.5a） =="
 tmux_ok=0
 for _ in $(seq 1 20); do
   if docker logs "${NAME}" 2>&1 | grep -q '"selected":"tmux"'; then tmux_ok=1; break; fi
@@ -117,7 +118,8 @@ echo "== [9/9] 版本快照与体积 =="
 docker exec "${NAME}" sh -c '
 printf "  · busybox(系统)=%s\n"   "$(/bin/busybox | head -1)"
 printf "  · busybox(工具箱)=%s\n" "$(/usr/local/bin/busybox | head -1)"
-printf "  · tmux=%s\n"            "$(tmux -V)"
+printf "  · tmux(工具箱)=%s\n"    "$(tmux -V)"
+printf "  · tmux(aiod专用)=%s\n"  "$(/usr/local/libexec/aiod-tmux/tmux -V)"
 printf "  · ssh=%s\n"             "$(ssh -V 2>&1)"
 printf "  · gawk=%s\n"            "$(gawk --version | head -1)"
 printf "  · pip=%s\n"             "$(python3 -m pip --version 2>&1 | head -1 || true)"
