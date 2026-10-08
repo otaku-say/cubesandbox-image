@@ -1,0 +1,10 @@
+# ── 上游跟踪（Track Upstream Images 每日巡检 digest；变更时触发重建）──
+ghcr.io/tencentcloud/cubesandbox-base:latest
+alpine:3.21.0
+
+# ── 手工提升项（不在自动跟踪范围，升级时需同步修改后自测）──
+# TOOLBOX_REF：otaku-say/skills 的 commit（见 Dockerfile ARG）
+#   升级流程：改 Dockerfile 的 TOOLBOX_REF → 重算 fetch-toolbox.sh 内嵌的 4 个哈希
+#   （scripts/install.sh、scripts/update.sh、SHA256SUMS.amd64、DOCS.sha256）→ 重新构建。
+# AIOD_VERSION：aio-static.tos-cn-beijing.volces.com 上的版本（见 Dockerfile ARG）
+#   升级流程：改 ARG → 重建；哈希与完整性由镜像内 SHA256SUMS 校验兜底。
