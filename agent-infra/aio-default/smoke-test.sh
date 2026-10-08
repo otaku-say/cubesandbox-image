@@ -90,9 +90,9 @@ if kill -0 "$tp" 2>/dev/null; then echo "  ✘ tini 未响应 TERM" >&2; exit 1;
 echo "  ✔ tini 存活 → TERM → 退出（信号转发链路正常）"
 '
 
-echo "== [7/9] aiod shell 后端断言（aiod 专用 tmux 3.8） =="
-docker exec "${NAME}" /usr/local/libexec/aiod-tmux/tmux -V | grep -q "3\.8" || { echo "  ✘ 专用 tmux 版本异常" >&2; exit 1; }
-echo "  ✔ aiod 专用 tmux = $(docker exec "${NAME}" /usr/local/libexec/aiod-tmux/tmux -V)"
+echo "== [7/9] aiod shell 后端断言（工具箱 tmux 3.8） =="
+docker exec "${NAME}" tmux -V | grep -q "3\.8" || { echo "  ✘ 工具箱 tmux 版本异常: $(docker exec "${NAME}" tmux -V)" >&2; exit 1; }
+echo "  ✔ 工具箱 tmux = $(docker exec "${NAME}" tmux -V)"
 tmux_ok=0
 for _ in $(seq 1 20); do
   if docker logs "${NAME}" 2>&1 | grep -q '"selected":"tmux"'; then tmux_ok=1; break; fi
@@ -120,8 +120,7 @@ echo "== [9/9] 版本快照与体积 =="
 docker exec "${NAME}" sh -c '
 printf "  · busybox(系统)=%s\n"   "$(/bin/busybox | head -1)"
 printf "  · busybox(工具箱)=%s\n" "$(/usr/local/bin/busybox | head -1)"
-printf "  · tmux(工具箱)=%s\n"    "$(tmux -V)"
-printf "  · tmux(aiod专用)=%s\n"  "$(/usr/local/libexec/aiod-tmux/tmux -V)"
+printf "  · tmux=%s\n"            "$(tmux -V)"
 printf "  · ssh=%s\n"             "$(ssh -V 2>&1)"
 printf "  · gawk=%s\n"            "$(gawk --version | head -1)"
 printf "  · pip=%s\n"             "$(python3 -m pip --version 2>&1 | head -1 || true)"

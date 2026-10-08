@@ -1,14 +1,13 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# aio-default —— 与本地 iSH 同源的 Alpine 沙箱镜像（v3）
+# aio-default —— 与本地 iSH 同源的 Alpine 沙箱镜像（v4）
 #
-# v3 变更（2026-10-08）：
-#   1. aiod 专用 tmux 升级为 **3.8-rc3 纯静态单文件**（zig 0.18-dev 编译；
-#      实测 3.8 修复了 3.7 的 list-keys 回归 → aiod 原生兼容，无需 shim/降级）
-#      —— 替代 v2 的 3.5a 动态装配（.so 搬运 + patchelf）；构建更简、形态更净
-#
-# v2 变更（保留）：
-#   2. 系统 /bin/busybox 切换为工具箱完整版 1.38.0（408 applet；原系统版 304）
+# v4 变更（2026-10-08）：
+#   1. tmux 升级为 **3.8**（ish-toolbox CI 构建：修复 3.7 的 list-keys 回归、
+#      保留完整 terminfo fallback）—— aiod 直接使用工具箱 tmux（PATH），
+#      **删除 v3 的 aiod 专用 tmux 与 AIO_TMUX_BIN**（不再需要任何兼容层）
+#   2. 系统 /bin/busybox（即 /bin/sh 等全部 applet）指定为工具箱完整版 1.38.0
+#      —— 作为沙箱**默认终端**（408 applet；原系统版 304）
 #
 # 设计原则（v1 起不变）：
 #   1. 基础镜像 = Alpine 3.21.0，与本地 iSH 完全同版本（仅 CPU 架构不同：amd64）
@@ -28,13 +27,13 @@ COPY --from=ghcr.io/tencentcloud/cubesandbox-base:latest /usr/local/bin/cube-ent
 RUN chmod 0755 /usr/bin/envd /usr/local/bin/cube-entrypoint.sh \
  && /usr/bin/envd -version
 
-# ---- 2) ish-toolbox 全量（46 件）：同源拉取 → 四文件强校验 → 一键安装 → 软链 ----
-ARG TOOLBOX_REF=c6a7f163c69fc97f92dabb27ec7d1d9c871586fa
+# ---- 2) ish-toolbox 全量（46 件，含 tmux 3.8）：同源拉取 → 四文件强校验 → 一键安装 → 软链 ----
+ARG TOOLBOX_REF=87435357ff6121e5716ce82b2cce0d9e3232b1d7
 COPY fetch-toolbox.sh /tmp/fetch-toolbox.sh
 RUN sh /tmp/fetch-toolbox.sh && rm -f /tmp/fetch-toolbox.sh
 
-# ---- 2.5) 系统 /bin/busybox 切换为工具箱完整版 1.38.0 ----
-# （iSH 侧同为 1.38.0 工具箱版；切换后 /bin/sh 等全部 applet 一并升级，408 applet）
+# ---- 2.5) 系统 /bin/busybox 切换为工具箱完整版 1.38.0（沙箱默认终端）----
+# （iSH 侧同为 1.38.0 工具箱版；切换后 /bin/sh、/bin/ash 等全部 applet 一并升级，408 applet）
 RUN cp -f /opt/skills/tools/busybox/amd64/busybox /bin/busybox \
  && chmod 0755 /bin/busybox \
  && /bin/busybox | head -1
@@ -66,14 +65,11 @@ RUN set -eux; \
     ln -sf /opt/skills/tools/python3/amd64/python3 /usr/local/bin/python; \
     mkdir -p /opt/bin /root/workspace
 
-# ---- 6) aiod 专用 tmux 3.8-rc3（纯静态单文件；zig 0.18-dev 编译，构建配方见 BUILD-NOTES.md）
-#        —— 仅经 AIO_TMUX_BIN 供 aiod 使用；用户/工具箱 tmux 3.7c 不受影响 ----
-COPY aiod-tmux-3.8rc3-x86_64-static /usr/local/libexec/aiod-tmux/tmux
+# ---- 6) tmux（aiod shell 后端）由工具箱提供（3.8，经 /usr/local/bin/tmux）----
+#      不再需要 v3 的 aiod 专用 tmux 与 AIO_TMUX_BIN；见 README「已知事项」
 RUN set -eux; \
-    chmod 0755 /usr/local/libexec/aiod-tmux/tmux; \
-    echo "ec334bab3b16fdf201b8df07bb94264f5ae4dd97424e430a2b702184c705a33a  /usr/local/libexec/aiod-tmux/tmux" | sha256sum -c -; \
-    /usr/local/libexec/aiod-tmux/tmux -V; \
-    /opt/skills/tools/tmux/amd64/tmux -V
+    tmux -V; \
+    [ "$(tmux -V | awk '{print $2}')" = "3.8" ]
 
 # ---- 7) 环境变量（PATH 与 iSH 完全一致；ENVD/AIO 变量与官方 base / aio-code 对齐）----
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin \
@@ -83,8 +79,7 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin \
     ENVD_REF=2026.16 \
     AIO_HOST=0.0.0.0 \
     AIO_PORT=8080 \
-    AIO_API_SURFACE=full \
-    AIO_TMUX_BIN=/usr/local/libexec/aiod-tmux/tmux
+    AIO_API_SURFACE=full
 
 # ---- 8) 运行时契约、健康检查与模板标签 ----
 EXPOSE 49983 8080
@@ -94,11 +89,11 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cube-entrypoint.sh"]
 CMD ["/usr/local/bin/aiod", "start"]
 
 LABEL org.opencontainers.image.title="CubeSandbox code sandbox (aio-default)" \
-      org.opencontainers.image.description="iSH 同源极简沙箱：Alpine 3.21.0 + busybox 1.38 + ish-toolbox 46 件静态工具 + envd/aiod（tmux 3.8-rc3 静态）；零 apk 软件" \
+      org.opencontainers.image.description="iSH 同源极简沙箱：Alpine 3.21.0 + busybox 1.38（默认终端）+ ish-toolbox 46 件静态工具（含 tmux 3.8）+ envd/aiod；零 apk 软件" \
       org.opencontainers.image.source="https://github.com/otaku-say/cubesandbox-image" \
       io.cubesandbox.envd.ref="native (portable; envd copied from cubesandbox-base)" \
-      io.cubesandbox.toolbox.ref="otaku-say/skills@c6a7f163c69fc97f92dabb27ec7d1d9c871586fa" \
-      io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080],"probePort":49983,"probePath":"/health","writableLayerSize":"10G","cpu":2000,"memory":2048,"alias":"aio-default","notes":"与本地 iSH 同源：Alpine 3.21.0 + busybox 1.38 + 同一套 46 件工具箱（零 apk 软件）"}' \
+      io.cubesandbox.toolbox.ref="otaku-say/skills@87435357ff6121e5716ce82b2cce0d9e3232b1d7" \
+      io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080],"probePort":49983,"probePath":"/health","writableLayerSize":"10G","cpu":2000,"memory":2048,"alias":"aio-default","notes":"与本地 iSH 同源：Alpine 3.21.0 + busybox 1.38 默认终端 + 同一套 46 件工具箱（零 apk 软件）"}' \
       io.cubesandbox.template.exposed-ports="49983,8080" \
       io.cubesandbox.template.probe-port="49983" \
       io.cubesandbox.template.probe-path="/health" \
