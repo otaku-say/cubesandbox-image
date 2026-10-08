@@ -53,7 +53,11 @@ done
 cp -L "$WORK/x/$TMUX_PKG/usr/bin/tmux" "$OUT/tmux"
 cp -L "$WORK/x/$LIBEV_PKG/usr/lib/libevent_core-2.1.so.7" "$OUT/"
 cp -L "$WORK/x/$NCURSES_PKG/usr/lib/libncursesw.so.6" "$OUT/"
-chmod 0755 "$OUT/tmux" "$OUT"/*.so
+chmod 0755 "$OUT/tmux" "$OUT"/*.so*
+# 显式完整性检查（防静默缺件）
+for f in tmux libevent_core-2.1.so.7 libncursesw.so.6; do
+  [ -f "$OUT/$f" ] || { echo "装配缺文件: $f" >&2; exit 1; }
+done
 
 echo "[4/5] patchelf 自包含化（rpath=\$ORIGIN）"
 patchelf --set-rpath '$ORIGIN' "$OUT/tmux"
