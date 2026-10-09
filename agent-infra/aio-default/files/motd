@@ -1,0 +1,5 @@
+aio-default 沙箱 · alpine 3.23.6 · envd + aiod · ish-toolbox ×58
+
+  速查：toolbox                 （工具清单与替代建议）
+  文档：/opt/skills/tools/<工具名>/USAGE.md
+  开发：git 2.56 · zig 0.17（zig cc）· uv（pip/pip3 已桥接）

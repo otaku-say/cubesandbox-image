@@ -1,14 +1,20 @@
 # ── 上游跟踪（Track Upstream Images 每日巡检 digest；变更时触发重建）──
-ghcr.io/tencentcloud/cubesandbox-base:latest
-alpine:3.21.0
+alpine:3.23.6
 
 # ── 手工提升项（不在自动跟踪范围，升级时需同步修改后自测）──
+# ENVD_VERSION（Dockerfile ARG）：官方 e2b-artifact-binaries 桶（sha256 边车校验）
+#   列表：https://storage.googleapis.com/storage/v1/b/e2b-artifact-binaries/o?prefix=envd/&maxResults=1000
+#   升级流程：改 ARG → 重建（v5 起不再依赖 ghcr.io/tencentcloud/cubesandbox-base 镜像）
+# cube-entrypoint.sh：vendored 自 TencentCloud/CubeSandbox master（2026-10-09 获取）
+#   sha256=5479737affc854261f16469fad1383c156baa89f6f2cecb0f294d26683fb5bc2
 # TOOLBOX_REF：otaku-say/skills 的 commit（见 Dockerfile ARG）
-#   升级流程：改 Dockerfile 的 TOOLBOX_REF → 重算 fetch-toolbox.sh 内嵌的 4 个哈希
-#   （scripts/install.sh、scripts/update.sh、SHA256SUMS.amd64、DOCS.sha256）→ 重新构建。
-# AIOD_VERSION：aio-static.tos-cn-beijing.volces.com 上的版本（见 Dockerfile ARG）
-#   升级流程：改 ARG → 重建；哈希与完整性由镜像内 SHA256SUMS 校验兜底。
+#   升级流程：改 TOOLBOX_REF → 重算 fetch-toolbox.sh 内嵌的 4 个哈希（脚本头部附命令）→ 重建
+# GIT 全套（edge 四件套）：Dockerfile 步骤 7 临时加 @edge(main+community) →
+#   装 git / git-perl / git-lfs / github-cli(gh) → git lfs install --system → 移除 @edge 行
+#   依赖实测全部来自 3.23 stable（记录见 BUILD-NOTES）；版本随 edge 滚动
+# ZIG_VERSION / AIOD_VERSION：见 Dockerfile ARG（zig 内嵌 sha 校验）
+#   - AIOD_VERSION：aio-static.tos-cn-beijing.volces.com 上的版本
+# YQ：已纳入工具箱（跟随上游自动链每日巡检 mikefarah/yq latest；本镜像经 TOOLBOX_REF 获取）
 # tmux（工具箱组件，兼 aiod shell 后端）：
-#   来源 = ish-toolbox CI 构建（scripts/build/tmux.sh，3.8 起）；经 skills 仓库自动同步
-#   升级流程：改 ish-toolbox/scripts/build/tmux.sh 版本 → CI 构建入库 → 升本目录 TOOLBOX_REF
-#   注意：tmux 3.7 存在 list-keys 回归（破坏 aiod 探测）；3.8 已修复且保留完整 terminfo fallback。
+#   3.7 存在 list-keys 回归（破坏 aiod 探测）；3.8 起修复且保留完整 terminfo fallback。
+#   v5 = 工具箱 47 件之一，升级 TOOLBOX_REF 即随之升级。
