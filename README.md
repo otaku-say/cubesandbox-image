@@ -32,5 +32,4 @@ ghcr.io/<owner>/cubesandbox-image/<org>/<project>:latest
 
 | 目录 | 产出 | 说明 |
 |---|---|---|
-| `agent-infra/aio-daemon` | `ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-daemon:latest` | AIO 2.x 官方 daemon 镜像 + envd 双通道（**v1+v2 双面**；浏览器/工具链齐全，日常基座） |
-| `agent-infra/aio-computer` | `ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-computer:latest` | AIO 2.x 官方「带桌面」镜像 + envd（**computer-use 可用**：XFCE + worker，用于桌面类验收） |
+| `agent-infra/aio-default` | `ghcr.io/<owner>/cubesandbox-image/agent-infra/aio-default:latest` | iSH 同源轻量基座（alpine 3.23.6 + busybox 1.38 + ish-toolbox 58 件 + envd/aiod + git/zig 开发链；默认规格 30G / cpu=3000 / memory=3000，别名 `aio-default`） |
