@@ -116,8 +116,10 @@ done
 echo "  ✔ $(docker exec "${NAME}" tmux -V) ；shell backend = tmux"
 
 echo "== [7/9] v2 命令通道：工具链端到端 =="
-out="$(curl -fsS -X POST http://127.0.0.1:8080/v2/commands -H 'Content-Type: application/json' \
-    -d '{"command":"echo SMOKE=$0; pwd; rg --version | head -1; python3 -c \"print(6*7)\"; echo {\"a\":12345} | jaq -r .a"}')"
+cat > /tmp/v2cmd.json <<'JSONEOF'
+{"command":"echo SMOKE=$0; pwd; rg --version | head -1; python3 -c \"print(6*7)\"; echo '{\"a\":12345}' | jaq -r .a"}
+JSONEOF
+out="$(curl -fsS -X POST http://127.0.0.1:8080/v2/commands -H 'Content-Type: application/json' --data-binary @/tmp/v2cmd.json)"
 printf '%s' "${out}" | grep -q "SMOKE=" || { echo "  ✘ v2/commands: ${out}" >&2; exit 1; }
 printf '%s' "${out}" | grep -q '"exit_code":0' || { echo "  ✘ v2 退出码非 0: ${out}" >&2; exit 1; }
 printf '%s' "${out}" | grep -q "12345" || { echo "  ✘ jaq 输出缺项: ${out}" >&2; exit 1; }
