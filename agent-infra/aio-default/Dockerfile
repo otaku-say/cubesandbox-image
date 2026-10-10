@@ -106,6 +106,7 @@ RUN set -eux; \
     ln -sf /opt/skills/tools/gawk/amd64/gawk /usr/local/bin/awk; \
     ln -sf /bin/busybox /usr/bin/nice; \
     mkdir -p /opt/bin /workspace /root/workspace; \
+    mkdir -p /tmp/.cube-cli-pty /tmp/.cube-cli-exec && chmod 1777 /tmp/.cube-cli-pty /tmp/.cube-cli-exec; \
     adduser -D -u 1000 -s /bin/bash user; \
     echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/user; \
     chmod 0440 /etc/sudoers.d/user; \
@@ -128,7 +129,7 @@ RUN set -eux; \
     ln -sf pip /usr/local/bin/pip3; \
     chmod 0644 /etc/bash/env.sh /etc/motd /opt/skills/tools/AGENT-GUIDE.md
 
-# ---- 11) 环境变量（PATH 与 iSH 一致；TZ；v2 面；低内存防御）----
+# ---- 11) 环境变量（PATH 与 iSH 一致；TZ；v2 面；三核口径）----
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -140,8 +141,8 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin \
     AIO_PORT=8080 \
     AIO_API_SURFACE=v2 \
     PIP_BREAK_SYSTEM_PACKAGES=1 \
-    UV_CONCURRENT_INSTALLS=2 \
-    MAKEFLAGS=-j2 \
+    UV_CONCURRENT_INSTALLS=3 \
+    MAKEFLAGS=-j3 \
     BASH_ENV=/etc/bash/env.sh
 
 # ---- 12) 运行时配置、工作目录与健康检查探针 ----

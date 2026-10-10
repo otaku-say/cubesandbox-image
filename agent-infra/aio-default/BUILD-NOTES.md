@@ -1,4 +1,4 @@
-# aio-default v5 重建记录（2026-10-09）
+# aio-default v5 重建记录（2026-10-09；2026-10-10 小修复见末节）
 
 ## 决策与来源（全部实测核验）
 
@@ -100,3 +100,20 @@
 
 构建与发布：`ish-toolbox/scripts/build/tmux.sh`（3.8 起）→ CI 双架构 → 入库；skills 仓库 15 分钟镜像；本目录通过 `TOOLBOX_REF` 提升。
 （手工复现细节见 git 历史 v4 版本。）
+
+## 2026-10-10 小修复：cube-cli pty-open 会话目录 + 3 核 ENV
+
+**根因（沙箱实测钉死）**：`cube-cli pty-open` 用 `/usr/bin/script -q -f -c "<shell> -i -l" /tmp/.cube-cli-pty/<tag>.log`
+持久会话；BusyBox 版 `script` 对日志文件是直接 `xopen`，父目录不存在即退出——
+`pid 起了即死、.log 未落盘、pty-read 报 does not exist`。目录存在时全链路通
+（write/read/resize/close；沙箱 pid 272 对照）。
+
+**补丁（三件套，BusyBox script 本体不动）**：
+
+1. Dockerfile 步骤 9：`mkdir -p /tmp/.cube-cli-pty /tmp/.cube-cli-exec && chmod 1777 …`
+   （1777 与 /tmp 本体语义一致；`pty-open --user=user` 必需——755 下 `su user touch` 实测 Permission denied）
+2. cube-entrypoint.sh：`start_envd` 后重建两目录（防 tmpfs 覆盖 / 人为误删；运行时兜底）
+3. smoke-test.sh [3/9]：目录存在 + 1777 + `script -q -c "echo smoke-ok"` 落盘三断言
+
+**ENV（沙箱默认 3 核对齐）**：`UV_CONCURRENT_INSTALLS=2→3`、`MAKEFLAGS=-j2→-j3`
+（步骤 11 注释“低内存防御”同步改为“三核口径”，以 LABEL cpu=3000 为准）。

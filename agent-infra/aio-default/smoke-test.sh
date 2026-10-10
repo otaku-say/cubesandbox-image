@@ -57,6 +57,14 @@ done
 [ "${AIO_API_SURFACE:-}" = "v2" ] || { echo "AIO_API_SURFACE != v2" >&2; exit 1; }
 [ -d /workspace ] && [ -w /workspace ] || { echo "/workspace 缺失或不可写" >&2; exit 1; }
 command -v sudo >/dev/null || { echo "sudo 缺失" >&2; exit 1; }
+[ -d /tmp/.cube-cli-pty ] || { echo "cube-cli PTY 会话目录缺失" >&2; exit 1; }
+[ -d /tmp/.cube-cli-exec ] || { echo "cube-cli exec 会话目录缺失" >&2; exit 1; }
+[ "$(stat -c %a /tmp/.cube-cli-exec)" = "1777" ] || { echo "exec 会话目录权限非 1777" >&2; exit 1; }
+[ "$(stat -c %a /tmp/.cube-cli-pty)" = "1777" ] || { echo "PTY 会话目录权限非 1777（--user=user 写不进）" >&2; exit 1; }
+rm -f /tmp/.cube-cli-pty/smoke.log
+script -q -c "echo smoke-ok" /tmp/.cube-cli-pty/smoke.log >/dev/null 2>&1
+grep -q "smoke-ok" /tmp/.cube-cli-pty/smoke.log || { echo "script 落盘冒烟失败" >&2; exit 1; }
+rm -f /tmp/.cube-cli-pty/smoke.log
 grep -q "^/bin/bash$" /etc/shells || { echo "/etc/shells 未登记 /bin/bash" >&2; exit 1; }
 ! grep -q "@edge" /etc/apk/world || { echo "apk world 残留 @edge" >&2; exit 1; }
 ! grep -q "@edge" /etc/apk/repositories || { echo "repositories 残留 @edge" >&2; exit 1; }

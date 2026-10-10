@@ -49,6 +49,13 @@ start_envd() {
 
 start_envd
 
+# cube-cli 会话目录兜底：pty-open 的 script(1) 直接 open 日志文件，
+# 目录缺失即退出（2026-10-10 实锤：pid 起了即死、.log 未落盘）。
+# 构建层目录运行时可能被 tmpfs 覆盖或人为误删，启动时重建最稳。
+# 1777 与 /tmp 本体语义一致（pty-open --user=user 必需，已实测）。
+mkdir -p /tmp/.cube-cli-pty /tmp/.cube-cli-exec
+chmod 1777 /tmp/.cube-cli-pty /tmp/.cube-cli-exec 2>/dev/null || true
+
 if [ "$#" -eq 0 ]; then
     # No user command: keep envd as the foreground process. tini is PID 1,
     # so we simply wait for envd to exit (or be signalled).
