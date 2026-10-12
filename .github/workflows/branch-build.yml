@@ -79,14 +79,6 @@ jobs:
             echo "（该目录未提供 smoke-test.sh，跳过）"
           fi
 
-      - name: 推送 :test 标签（冒烟通过后）
-        run: |
-          set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          dst="ghcr.io/${{ github.repository }}/${{ matrix.dir }}:test"
-          docker tag "csi-test/${{ matrix.dir }}:test" "${dst}"
-          docker push "${dst}"
-          echo "已推送 ${dst}"
 
       - name: 汇总
         run: |
