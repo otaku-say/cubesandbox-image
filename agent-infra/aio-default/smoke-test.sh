@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aio-default 冒烟测试（v5）—— 构建后容器级验收（需要 docker）
+# aio-default 冒烟测试（v6）—— 构建后容器级验收（需要 docker）
 # 用法: ./smoke-test.sh <image>
-# 覆盖：探针/v2 API（v1 应关闭）/ 内部一致性（3.23.6、busybox 1.38、TZ=+0800）/
-#       58 工具全量探测 / 全清单校验 / tini 信号 / tmux 后端 /
-#       v2 命令通道端到端（rg/python/jaq）/ Agent 层（toolbox/AGENT-GUIDE/缺命令提示/pip 桥）/
-#       开发链（git 2.56、zig 编译、gh、git-lfs、uv）/ LABEL 与体积
+# 覆盖：探针/v2 API（v1 应关闭）/ 内部一致性（3.23.6、系统 busybox、TZ=+0800、
+#       真 pip + pillow/numpy）/ 工具箱 43 件全量探测 + 清单校验 + 15 件下架验证 /
+#       tini 信号 / tmux 后端 / v2 命令通道端到端（rg/python/jaq）/ Agent 层 /
+#       开发链（git 2.56、zig、gh、git-lfs、uv）/ LABEL 与体积
 # =============================================================================
 set -euo pipefail
 
@@ -48,11 +48,12 @@ docker exec "${NAME}" sh -c '
 set -eu
 [ "$(cat /etc/alpine-release)" = "3.23.6" ] || { echo "alpine 版本不符: $(cat /etc/alpine-release)" >&2; exit 1; }
 [ "$PATH" = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" ] || { echo "PATH 不符: $PATH" >&2; exit 1; }
-for f in /bin/bash /usr/bin/python3 /usr/bin/tini /usr/local/bin/aiod /usr/local/bin/curl \
+for f in /bin/bash /usr/bin/python3 /usr/bin/pip /usr/bin/tini /usr/local/bin/aiod /usr/bin/curl \
          /usr/bin/git /usr/local/bin/zig /usr/bin/gh /usr/bin/git-lfs /usr/local/bin/toolbox; do
-  [ -x "$f" ] || { echo "$f 缺失" >&2; exit 1; }
+  [ -e "$f" ] || { echo "$f 缺失" >&2; exit 1; }
 done
-/bin/busybox | head -1 | grep -q "v1.38.0" || { echo "系统 busybox 未切换为 1.38.0" >&2; exit 1; }
+# 系统 busybox 保持原版（v6 不再用工具箱 busybox 替换）
+/bin/busybox | head -1 | grep -q "BusyBox v1.3" || { echo "系统 busybox 异常: $(/bin/busybox | head -1)" >&2; exit 1; }
 [ "$(date +%z)" = "+0800" ] || { echo "TZ 未生效: $(date +%z)" >&2; exit 1; }
 [ "${AIO_API_SURFACE:-}" = "v2" ] || { echo "AIO_API_SURFACE != v2" >&2; exit 1; }
 [ -d /workspace ] && [ -w /workspace ] || { echo "/workspace 缺失或不可写" >&2; exit 1; }
@@ -69,11 +70,25 @@ grep -q "^/bin/bash$" /etc/shells || { echo "/etc/shells 未登记 /bin/bash" >&
 ! grep -q "@edge" /etc/apk/world || { echo "apk world 残留 @edge" >&2; exit 1; }
 ! grep -q "@edge" /etc/apk/repositories || { echo "repositories 残留 @edge" >&2; exit 1; }
 apk add --simulate file >/dev/null 2>&1 || { echo "apk 不可用（world 依赖异常）" >&2; exit 1; }
-printf "  · %s / PATH 一致 / TZ=$(date +%z) / pwd=%s\n" "$(cat /etc/alpine-release)" "$(pwd)"
+printf "  · %s / PATH 一致 / TZ=%s / pwd=%s\n" "$(cat /etc/alpine-release)" "$(date +%z)" "$(pwd)"
 printf "  · busybox(系统)=%s\n" "$(/bin/busybox | head -1)"
 '
 
-echo "== [4/9] 工具箱全量探测（动态比对数量）+ 清单校验 =="
+echo "== [4/9] Python 栈与 AOJIT 迁移位（真 pip / pillow / numpy；15 件已下架） =="
+docker exec "${NAME}" sh -c '
+set -eu
+p="$(pip --version 2>&1 || true)"
+printf "  · %s\n" "$p"
+case "$p" in pip\ *) : ;; *) echo "  ✘ pip 异常（期望真 pip）: $p" >&2; exit 1 ;; esac
+python3 -c "import PIL.Image, numpy; print(\"  · pillow+numpy ok\")" || { echo "  ✘ pillow/numpy 不可用" >&2; exit 1; }
+python3 -V | sed "s/^/  · /"
+for t in busybox python3 curl openssl ssh scp sftp ssh-add ssh-agent ssh-keygen ssh-keyscan sqlite3 socat drill uv; do
+  [ -e "/opt/skills/tools/$t" ] && { echo "  ✘ 已下架工具仍在工具箱：$t" >&2; exit 1; }
+done
+echo "  ✔ 15 件下架位确认（工具箱内不存在）"
+'
+
+echo "== [5/9] 工具箱全量探测（动态比对数量）+ 清单校验 =="
 docker exec "${NAME}" sh -c '
 set -eu
 n=0; bad=""
@@ -90,18 +105,19 @@ done
 echo "  探测: $n 件; 无响应:[${bad:-无}]"
 exp=$(wc -l < /opt/skills/tools/SHA256SUMS.amd64)
 [ "$n" -eq "$exp" ] || { echo "  ✘ 工具数量不符（$n != $exp）" >&2; exit 1; }
+[ "$n" -eq 43 ] || { echo "  ✘ 工具箱应为 43 件（AOJIT 迁移后），实际 $n" >&2; exit 1; }
 [ -z "$bad" ] || { echo "  ✘ 存在无响应工具" >&2; exit 1; }
 cd /opt/skills/tools && sha256sum -c SHA256SUMS.amd64 >/dev/null
 echo "  ✔ $n/$exp 可执行 + sha256 清单复核通过"
-for t in curl python python3 uv rg fd jaq gawk awk coreutils grep sed find xargs diff tar xz zip unzip yq tmux sqlite3 zstd patch openssl bash tini tree; do
+for t in rg fd jaq gawk awk coreutils grep sed find xargs diff tar xz zip unzip yq tmux zstd patch bash tini tree qjs sd sponge; do
   p=$(command -v "$t" 2>/dev/null) || { echo "  ✘ $t 缺失" >&2; exit 1; }
   r=$(readlink -f "$p")
   case "$r" in /opt/skills/tools/*) : ;; *) echo "  ✘ $t 未解析到工具箱: $r" >&2; exit 1 ;; esac
 done
-echo "  ✔ 工具箱优先链路（抽查 28 项全部命中 /opt/skills/tools）"
+echo "  ✔ 工具箱优先链路（抽查 25 项全部命中 /opt/skills/tools）"
 '
 
-echo "== [5/9] tini 信号链路 =="
+echo "== [6/9] tini 信号链路 =="
 docker exec "${NAME}" sh -c 'tini --version | sed "s/^/  · /"'
 docker exec "${NAME}" sh -c 'nohup tini -- sleep 60 >/dev/null 2>&1 & echo $! > /tmp/tinip; echo started' >/dev/null
 sleep 1
@@ -113,7 +129,7 @@ if kill -0 "$tp" 2>/dev/null; then echo "  ✘ tini 未响应 TERM" >&2; exit 1;
 echo "  ✔ tini 存活 → TERM → 退出（信号转发链路正常）"
 '
 
-echo "== [6/9] aiod shell 后端断言（工具箱 tmux 3.8） =="
+echo "== [7/9] aiod shell 后端断言（工具箱 tmux 3.8） =="
 docker exec "${NAME}" tmux -V | grep -q "3\.8" || { echo "  ✘ tmux 版本异常" >&2; exit 1; }
 tmux_ok=0
 for _ in $(seq 1 20); do
@@ -123,29 +139,27 @@ done
 [ "${tmux_ok}" = "1" ] || { echo "  ✘ tmux backend 未激活" >&2; docker logs "${NAME}" 2>&1 | tail -20 >&2; exit 1; }
 echo "  ✔ $(docker exec "${NAME}" tmux -V) ；shell backend = tmux"
 
-echo "== [7/9] v2 命令通道：工具链端到端 =="
+echo "== [8/9] v2 命令通道 + Agent 层与开发链 =="
 cat > /tmp/v2cmd.json <<'JSONEOF'
-{"command":"echo SMOKE=$0; pwd; rg --version | head -1; python3 -c \"print(6*7)\"; echo '{\"a\":12345}' | jaq -r .a"}
+{"command":"echo SMOKE=$0; pwd; rg --version | head -1; python3 -c \"print(6*7)\"; echo '{\"a\":12345}' | jaq -r .a; uv --version"}
 JSONEOF
 out="$(curl -fsS -X POST http://127.0.0.1:8080/v2/commands -H 'Content-Type: application/json' --data-binary @/tmp/v2cmd.json)"
 printf '%s' "${out}" | grep -q "SMOKE=" || { echo "  ✘ v2/commands: ${out}" >&2; exit 1; }
 printf '%s' "${out}" | grep -q '"exit_code":0' || { echo "  ✘ v2 退出码非 0: ${out}" >&2; exit 1; }
 printf '%s' "${out}" | grep -q "12345" || { echo "  ✘ jaq 输出缺项: ${out}" >&2; exit 1; }
 printf '%s' "${out}" | grep -q "42" || { echo "  ✘ 输出缺 42: ${out}" >&2; exit 1; }
+printf '%s' "${out}" | grep -q "uv" || { echo "  ✘ 输出缺 uv: ${out}" >&2; exit 1; }
 echo "  · v2 输出片段: $(printf '%s' "${out}" | head -c 220)"
-echo "  ✔ v2/commands：rg / python3 / jaq 端到端可用"
+echo "  ✔ v2/commands：rg / python3 / jaq / uv 端到端可用"
 
-echo "== [8/9] Agent 层与开发链 =="
 docker exec "${NAME}" bash -c '
 set -eu
 v="$(git --version | awk "{print \$3}")"
 [ "$(printf "%s\n2.56.0\n" "$v" | sort -V | head -1)" = "2.56.0" ] || { echo "  ✘ git 版本过低: $v" >&2; exit 1; }
 git config --system --get filter.lfs.clean >/dev/null || { echo "  ✘ git-lfs 未初始化（filter.lfs 缺失）" >&2; exit 1; }
-printf "  · %s\n" "$(git --version)" "$(git-lfs --version | head -1)" "$(gh --version | head -1)" "zig $(zig version)" "$(uv --version)" "$(python3 -V)"
+printf "  · %s\n" "$(git --version)" "$(git-lfs --version | head -1)" "$(gh --version | head -1)" "zig $(zig version)" "$(uv --version)" "$(python3 -V)" "$(node --version)"
 out=$(bash -c definitely-not-a-cmd-xyz 2>&1 || true)
 echo "$out" | grep -q "ish-toolbox" || { echo "  ✘ 缺命令提示未生效: $out" >&2; exit 1; }
-out=$(pip --version 2>&1 || true)
-echo "$out" | grep -q "uv" || { echo "  ✘ pip 桥异常: $out" >&2; exit 1; }
 toolbox | head -5 | grep -q "工具箱" || { echo "  ✘ toolbox 命令异常" >&2; exit 1; }
 [ -f /opt/skills/tools/AGENT-GUIDE.md ] || { echo "  ✘ AGENT-GUIDE 缺失" >&2; exit 1; }
 cd /tmp && rm -rf gsm && mkdir gsm && cd gsm && git init -q && git config user.email a@b && git config user.name a \
@@ -156,7 +170,7 @@ rc=0; ./z || rc=$?
 [ "$rc" = "7" ] || { echo "  ✘ zig cc 冒烟失败 rc=$rc" >&2; exit 1; }
 sudo -u user id 2>/dev/null | grep -q "uid=1000" || { echo "  ✘ sudo -u user 异常" >&2; exit 1; }
 sudo -u user sudo -n id 2>/dev/null | grep -q "uid=0" || { echo "  ✘ user 免密 sudo 未生效" >&2; exit 1; }
-echo "  ✔ git 提交/日志、zig cc 编译运行、gh/git-lfs/uv、toolbox、pip 桥、缺命令提示、user 免密 sudo 全部可用"
+echo "  ✔ git 提交/日志、zig cc 编译运行、gh/git-lfs/uv/node、toolbox、缺命令提示、user 免密 sudo 全部可用"
 '
 
 echo "== [9/9] LABEL 与体积 =="

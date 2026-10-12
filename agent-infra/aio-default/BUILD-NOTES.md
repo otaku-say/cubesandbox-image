@@ -117,3 +117,37 @@
 
 **ENV（沙箱默认 3 核对齐）**：`UV_CONCURRENT_INSTALLS=2→3`、`MAKEFLAGS=-j2→-j3`
 （步骤 11 注释“低内存防御”同步改为“三核口径”，以 LABEL cpu=3000 为准）。
+
+---
+
+## v6（2026-10-12）AOJIT 迁移对齐版
+
+**背景**：minis 内置 AOJIT 加速后，凡 AOJIT 提供加速的程序在 iSH 上实测都比自编译静态版快，
+因此 ish-toolbox 下架 15 件；云端沙箱没有 AOJIT，改为「apk 系统版 + 工具箱 43 件」的等价组合。
+
+**下架 15 件**（工具箱内已不存在）：
+`busybox` `python3` `curl` `openssl` `ssh` `scp` `sftp` `ssh-add` `ssh-agent`
+`ssh-keygen` `ssh-keyscan` `sqlite3` `socat` `drill` `uv`
+
+**apk 补位**（取本分支最新版，**不与本地 iSH 对齐版本号**）：
+`python3 py3-pip py3-setuptools py3-pillow py3-numpy nodejs npm curl openssl sqlite
+socat drill uv bind-tools openssh-client jq`
+已按「有替代」或「交互式 TUI」裁掉：`vim 7zip b3sum nnn ncdu`；
+`py3-numpy` 经确认保留（数值/数据分析常用）。
+
+**构建输入变更**：`fetch-toolbox.sh` 直取 `otaku-say/ish-toolbox` 的产物 commit
+（双架构产物与 SHA256SUMS 同 commit 发布），逐件校验后落 `/opt/skills/tools`，
+不再依赖 skills 镜像仓、也不再内嵌 4 个脚本哈希常量。
+
+**行为变更**：
+- 不再替换系统 busybox（工具箱已无 busybox）→ `/bin/busybox` 保持 Alpine 原版
+- 不再做 `pip → uv` 桥接（装了真 pip，与本地 iSH 手感一致）
+- 不再软链工具箱 python3（改由 apk 提供 `/usr/bin/python3`）
+- `awk` 仍指向工具箱 `gawk`；`bash` 仍为工具箱静态版（系统无 bash）
+
+**冒烟测试同步**：工具数 58→43 硬断言、15 件下架位断言、真 pip + pillow/numpy 断言、
+工具箱优先链路抽查清单更新（去掉已下架的 curl/python3/openssl/sqlite3/uv）。
+
+**已知版本落差（不处理）**：本地 iSH 的 `libcrypto3/libssl3` 为 3.3.7-r2，
+AOJIT 录制版为 3.3.2-r4，故这两库在 iSH 上是部分提速（81%/76%）；apk 无旧版可装，
+按用户决定使用现版本，不做外部拉取。
