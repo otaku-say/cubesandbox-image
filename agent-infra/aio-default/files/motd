@@ -1,5 +1,7 @@
-aio-default 沙箱 · alpine 3.23.6 · envd + aiod · ish-toolbox ×58
+aio-default 沙箱 · alpine 3.23.6 · envd + aiod · ish-toolbox ×43 + apk 系统层
 
   速查：toolbox                 （工具清单与替代建议）
   文档：/opt/skills/tools/<工具名>/USAGE.md
-  开发：git 2.56 · zig 0.17（zig cc）· uv（pip/pip3 已桥接）
+  开发：git 2.56 · zig 0.17（zig cc）· python3/pip（真 pip）· node/npm · uv
+  说明：AOJIT 加速的工具（busybox/python3/curl/openssl/ssh/sqlite3/socat/drill/uv）
+        在本镜像改由系统与 apk 提供，工具箱只保留 43 件静态增强工具

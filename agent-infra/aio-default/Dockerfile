@@ -1,42 +1,59 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# 项目名称：aio-default 沙箱镜像 (CubeSandbox)
-# 作    者：CubeSandbox 架构维护团队
-# 创建时间：2026-10-09
-# 功能简述：基于 Alpine 3.23 的 MicroVM 代码执行沙箱基础镜像，集成 BusyBox 1.38
-#           默认终端、ish-toolbox 扩展、envd 与 aiod 守护进程、Git Edge 最新
-#           构建套件以及 Zig 0.17 跨平台编译工具链。
-# 设计原则：工具层 = ish-toolbox 58 件（与 iSH 同源同校验，busybox 1.38 默认终端）；
-#           平台契约对齐官方 base（envd :49983 / cube-entrypoint / nice / user 账号）。
-# 变更记录：见 BUILD-NOTES.md（v5 选型与实测证据）
+# 项目名称：aio-default 沙箱镜像 (CubeSandbox)  v6「AOJIT 迁移对齐版」
+# 创建时间：2026-10-12
+# 功能简述：基于 Alpine 3.23 的 MicroVM 代码执行沙箱基础镜像。
+#
+# v6 变更（对齐本地 iSH 手感；云端无 AOJIT，取 apk 源最新版即可）：
+#   1) 工具箱裁到 43 件：原 58 件中，AOJIT 内置加速的 15 件已下架
+#      （busybox/python3/curl/openssl/ssh 全家/sqlite3/socat/drill/uv）
+#   2) 下架的 15 件改由 apk 提供：python3/py3-pip/nodejs/npm/curl/openssl/
+#      sqlite/socat/drill/uv/openssh-client/bind-tools；busybox 用系统自带
+#   3) 不再替换系统 busybox（工具箱已无 busybox）；不再做 pip→uv 桥接
+#      （装真 pip，与本地 iSH 一致）
+#   4) 手感补位（人工确认保留）：jq + python3/py3-pip/py3-setuptools/
+#      py3-pillow/py3-numpy；已按「有替代」或「交互式 TUI」裁掉
+#      vim/7zip/b3sum/nnn/ncdu
+#
+# 设计原则：工具层 = 工具箱 43 件（静态，与 iSH 同源同校验，直取
+#          otaku-say/ish-toolbox 的产物 commit）+ apk 系统层（编译链 /
+#          解释器 / 网络与加密 CLI）；平台契约对齐官方 base
+#          （envd :49983 / cube-entrypoint / nice / user 账号）。
 # =============================================================================
 FROM alpine:3.23.6
 
 ARG ENVD_VERSION=v0.9.202610091259-41ed62c3bc4
-ARG TOOLBOX_REF=b77dd03a2ee61ff055f2a7285ee9c0ed4568d745
+# TOOLBOX_REF = otaku-say/ish-toolbox 的产物 commit（工具箱 43 件）
+ARG TOOLBOX_REF=671e3d063253c49dbb7ceaf50228804b822803f7
 ARG AIOD_VERSION=v0.9.2
 ARG AIOD_PLATFORM=linux-x86_64
 ARG AIOD_BASE_URL=https://aio-static.tos-cn-beijing.volces.com
 ARG ZIG_VERSION=0.17.0
 
-# ---- 1) 系统软件（编译基础设施与运行库；可替代项一律不装——工具层见步骤 2）----
-# 安装系统基础依赖、编译链及 sudo；Perl 由后续 git-perl 统一维护管理
+# ---- 1) 系统软件层（apk；取本分支最新版，不与 iSH 对齐版本号）----
+#  A. 编译基础设施与运行库
+#  B. AOJIT 迁移补位：原工具箱自带、现由 apk 提供的 CLI 与解释器
+#  C. 高频手感工具：jq + Python 图像/数值栈（人工确认保留）
 RUN set -eux; \
     apk add --no-cache \
         ca-certificates tzdata sudo \
         make pkgconf linux-headers binutils file \
         autoconf automake libtool m4 bison flex \
-        qemu-aarch64 gcompat; \
+        qemu-aarch64 gcompat \
+        jq \
+        python3 py3-pip py3-setuptools py3-pillow py3-numpy \
+        nodejs npm \
+        curl openssl sqlite socat drill uv bind-tools \
+        openssh-client; \
     rm -rf /var/cache/apk/*; \
     ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
     echo "Asia/Shanghai" > /etc/timezone
 
-# ---- 2) ish-toolbox 全量 58 件（强校验 → 一键安装 → busybox 替换 → 软链）----
-#   （先于各下载步骤安装：后续 envd/aiod/zig 全部使用工具箱静态 curl）
+# ---- 2) ish-toolbox 43 件（与本地 iSH 同一套：逐件强校验 → 软链）----
 COPY fetch-toolbox.sh /tmp/fetch-toolbox.sh
 RUN sh /tmp/fetch-toolbox.sh && rm -f /tmp/fetch-toolbox.sh
 
-# ---- 3) envd：官方桶直取 + sha256 边车校验（最新构建；使用工具箱 curl）----
+# ---- 3) envd：官方桶直取 + sha256 边车校验 ----
 RUN set -eux; \
     curl -fsSL --retry 3 "https://storage.googleapis.com/e2b-artifact-binaries/envd/${ENVD_VERSION}/envd" -o /usr/bin/envd; \
     curl -fsSL --retry 3 "https://storage.googleapis.com/e2b-artifact-binaries/envd/${ENVD_VERSION}/envd.sha256" -o /tmp/envd.sha256; \
@@ -46,11 +63,11 @@ RUN set -eux; \
     mkdir -p /var/log; \
     /usr/bin/envd -version
 
-# ---- 4) cube-entrypoint.sh（官方 master 版，vendored；sha256 记录于 upstream.txt）----
+# ---- 4) cube-entrypoint.sh（官方 master 版，vendored）----
 COPY cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/cube-entrypoint.sh
 
-# ---- 5) tini（工具箱静态版，替代 base 的 glibc 动态版）----
+# ---- 5) tini（工具箱静态版，替代 base 的 glibc 动态版；仍在 43 件内）----
 RUN install -m 0755 /opt/skills/tools/tini/amd64/tini /usr/bin/tini && /usr/bin/tini --version
 
 # ---- 6) aiod（musl 静态单文件 + SHA256SUMS 校验）----
@@ -63,8 +80,8 @@ RUN set -eux; \
     /usr/local/bin/aiod version; rm -f /tmp/aiod-SHA256SUMS /tmp/aiod.sum
 
 # ---- 7) git 核心四件套（edge 分支定向构建）----
-#   通过 edge 源拉取最新版；依赖实测全部来自 3.23 stable；装完清理 @edge（repositories
-#   与 apk world 双清理——只删 repositories 会留下 world 缺 tag 的隐患，见 BUILD-NOTES）
+#   通过 edge 源拉取最新版；依赖实测全部来自 3.23 stable；装完清理 @edge
+#   （repositories 与 apk world 双清理——只删 repositories 会留下 world 缺 tag 的隐患）
 RUN set -eux; \
     echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories; \
     echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories; \
@@ -95,14 +112,12 @@ RUN set -eux; \
     chmod 0755 /usr/local/bin/cc /usr/local/bin/c++; \
     zig version
 
-# ---- 9) 基础系统软链接、用户权限与 Git 运行时优化 ----
-# 映射 bash、python 路径，awk 指向工具箱 gawk（同名兼容语义优先），
-# 登记标准 shell，配置 user 免密 sudo 与可写工作目录
+# ---- 9) 基础软链接、用户权限与 Git 运行时优化 ----
+#  说明：python3/pip 由 apk 提供（不再软链工具箱）；awk 指向工具箱 gawk；
+#        bash 为工具箱静态版（Alpine 系统无 bash）。
 RUN set -eux; \
     ln -sf /opt/skills/tools/bash/amd64/bash /bin/bash; \
     grep -qxF '/bin/bash' /etc/shells || echo '/bin/bash' >> /etc/shells; \
-    ln -sf /opt/skills/tools/python3/amd64/python3 /usr/bin/python3; \
-    ln -sf /opt/skills/tools/python3/amd64/python3 /usr/local/bin/python; \
     ln -sf /opt/skills/tools/gawk/amd64/gawk /usr/local/bin/awk; \
     ln -sf /bin/busybox /usr/bin/nice; \
     mkdir -p /opt/bin /workspace /root/workspace; \
@@ -118,15 +133,14 @@ RUN set -eux; \
     git config --system pack.windowMemory 256m; \
     git config --system pack.threads 2
 
-# ---- 10) Agent 层：速查命令 / 指南 / 缺命令提示 / pip→uv 桥 ----
+# ---- 10) Agent 层：速查命令 / 指南 / 缺命令提示 ----
+#  pip 桥已移除（现在装的是真 pip，与本地 iSH 一致）
 COPY files/bash_env.sh /etc/bash/env.sh
 COPY files/toolbox.sh /usr/local/bin/toolbox
-COPY files/pip-shim.sh /usr/local/bin/pip
 COPY files/motd /etc/motd
 COPY agent-guide.md /opt/skills/tools/AGENT-GUIDE.md
 RUN set -eux; \
-    chmod 0755 /usr/local/bin/toolbox /usr/local/bin/pip; \
-    ln -sf pip /usr/local/bin/pip3; \
+    chmod 0755 /usr/local/bin/toolbox; \
     chmod 0644 /etc/bash/env.sh /etc/motd /opt/skills/tools/AGENT-GUIDE.md
 
 # ---- 11) 环境变量（PATH 与 iSH 一致；TZ；v2 面；三核口径）----
@@ -155,11 +169,11 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cube-entrypoint.sh"]
 CMD ["/usr/local/bin/aiod", "start"]
 
 LABEL org.opencontainers.image.title="CubeSandbox code sandbox (aio-default)" \
-      org.opencontainers.image.description="iSH 同源 Alpine 沙箱 v5：alpine 3.23.6 + busybox 1.38 默认终端 + ish-toolbox 58 件 + envd/aiod + git 2.56/zig 0.17 开发链" \
+      org.opencontainers.image.description="iSH 同源 Alpine 沙箱 v6：alpine 3.23.6 + ish-toolbox 43 件 + apk 系统层（python3/nodejs/curl/openssl/git/zig）" \
       org.opencontainers.image.source="https://github.com/otaku-say/cubesandbox-image" \
       io.cubesandbox.envd.ref="${ENVD_VERSION}" \
-      io.cubesandbox.toolbox.ref="otaku-say/skills@${TOOLBOX_REF}" \
-      io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080],"probePort":49983,"probePath":"/health","writableLayerSize":"30G","cpu":3000,"memory":3000,"alias":"aio-default","notes":"iSH 同源：alpine 3.23.6 + busybox 1.38 默认终端 + 58 件工具箱 + git/zig 开发链"}' \
+      io.cubesandbox.toolbox.ref="otaku-say/ish-toolbox@${TOOLBOX_REF}" \
+      io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080],"probePort":49983,"probePath":"/health","writableLayerSize":"30G","cpu":3000,"memory":3000,"alias":"aio-default","notes":"iSH 同源：alpine 3.23.6 + 工具箱 43 件 + apk 系统层"}' \
       io.cubesandbox.template.exposed-ports="49983,8080" \
       io.cubesandbox.template.probe-port="49983" \
       io.cubesandbox.template.probe-path="/health" \

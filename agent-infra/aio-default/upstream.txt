@@ -7,14 +7,20 @@ alpine:3.23.6
 #   升级流程：改 ARG → 重建（v5 起不再依赖 ghcr.io/tencentcloud/cubesandbox-base 镜像）
 # cube-entrypoint.sh：vendored 自 TencentCloud/CubeSandbox master（2026-10-09 获取）
 #   sha256=5479737affc854261f16469fad1383c156baa89f6f2cecb0f294d26683fb5bc2
-# TOOLBOX_REF：otaku-say/skills 的 commit（见 Dockerfile ARG）
-#   升级流程：改 TOOLBOX_REF → 重算 fetch-toolbox.sh 内嵌的 4 个哈希（脚本头部附命令）→ 重建
+# TOOLBOX_REF：otaku-say/ish-toolbox 的**产物 commit**（v6 起直取产物源，不再走 skills 镜像仓）
+#   v6 值 = 671e3d063253c49dbb7ceaf50228804b822803f7（AOJIT 迁移后 43 件）
+#   升级流程：改 TOOLBOX_REF → 重建（fetch-toolbox.sh 按该 commit 的
+#   tools/SHA256SUMS.amd64 逐件校验，内嵌哈希常量已取消）
+# 工具箱件数：v5 = 58 件；v6 = 43 件（15 件 AOJIT 加速工具下架，改由 apk 提供）
 # GIT 全套（edge 四件套）：Dockerfile 步骤 7 临时加 @edge(main+community) →
 #   装 git / git-perl / git-lfs / github-cli(gh) → git lfs install --system → 移除 @edge 行
 #   依赖实测全部来自 3.23 stable（记录见 BUILD-NOTES）；版本随 edge 滚动
 # ZIG_VERSION / AIOD_VERSION：见 Dockerfile ARG（zig 内嵌 sha 校验）
 #   - AIOD_VERSION：aio-static.tos-cn-beijing.volces.com 上的版本
-# YQ：已纳入工具箱（跟随上游自动链每日巡检 mikefarah/yq latest；本镜像经 TOOLBOX_REF 获取）
 # tmux（工具箱组件，兼 aiod shell 后端）：
 #   3.7 存在 list-keys 回归（破坏 aiod 探测）；3.8 起修复且保留完整 terminfo fallback。
-#   v5 = 工具箱 47 件之一，升级 TOOLBOX_REF 即随之升级。
+#   v6 = 工具箱 43 件之一，升级 TOOLBOX_REF 即随之升级。
+# apk 系统层（AOJIT 迁移补位，取本分支最新版，不与本地 iSH 对齐版本号）：
+#   python3 py3-pip py3-setuptools py3-pillow py3-numpy nodejs npm curl openssl
+#   sqlite socat drill uv bind-tools openssh-client jq
+#   已裁（有替代或交互式 TUI）：vim 7zip b3sum nnn ncdu
