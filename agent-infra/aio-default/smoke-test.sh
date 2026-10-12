@@ -48,7 +48,7 @@ docker exec "${NAME}" sh -c '
 set -eu
 [ "$(cat /etc/alpine-release)" = "3.23.6" ] || { echo "alpine 版本不符: $(cat /etc/alpine-release)" >&2; exit 1; }
 [ "$PATH" = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" ] || { echo "PATH 不符: $PATH" >&2; exit 1; }
-for f in /bin/bash /usr/bin/python3 /usr/local/bin/pip /usr/bin/tini /usr/local/bin/aiod /usr/bin/curl \
+for f in /bin/bash /usr/bin/python3 /usr/bin/pip /usr/bin/tini /usr/local/bin/aiod /usr/bin/curl \
          /usr/bin/git /usr/local/bin/zig /usr/bin/gh /usr/bin/git-lfs /usr/local/bin/toolbox; do
   [ -e "$f" ] || { echo "$f 缺失" >&2; exit 1; }
 done
