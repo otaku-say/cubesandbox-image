@@ -49,9 +49,12 @@ set -eu
 [ "$(cat /etc/alpine-release)" = "3.23.6" ] || { echo "alpine 版本不符: $(cat /etc/alpine-release)" >&2; exit 1; }
 [ "$PATH" = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" ] || { echo "PATH 不符: $PATH" >&2; exit 1; }
 for f in /bin/bash /usr/bin/python3 /usr/bin/pip /usr/bin/tini /usr/local/bin/aiod /usr/bin/curl \
-         /usr/bin/git /usr/local/bin/zig /usr/bin/gh /usr/bin/git-lfs /usr/local/bin/toolbox; do
+         /usr/bin/git /usr/local/bin/zig /usr/bin/gh /usr/bin/git-lfs /usr/local/bin/toolbox \
+         /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/mcp-gateway; do
   [ -e "$f" ] || { echo "$f 缺失" >&2; exit 1; }
 done
+uv --version | grep -q "0.13.1" || { echo "uv 版本不是 0.13.1: $(uv --version)" >&2; exit 1; }
+mcp-gateway catalog | grep -q "duckduckgo" || { echo "mcp-gateway catalog 异常" >&2; exit 1; }
 # 系统 busybox 保持原版（v6 不再用工具箱 busybox 替换）
 /bin/busybox | head -1 | grep -q "BusyBox v1.3" || { echo "系统 busybox 异常: $(/bin/busybox | head -1)" >&2; exit 1; }
 [ "$(date +%z)" = "+0800" ] || { echo "TZ 未生效: $(date +%z)" >&2; exit 1; }
@@ -175,10 +178,11 @@ echo "  ✔ git 提交/日志、zig cc 编译运行、gh/git-lfs/uv/node、toolb
 
 echo "== [9/9] LABEL 与体积 =="
 lbl="$(docker image inspect "${IMG}" --format '{{json .Config.Labels}}')"
-printf '%s' "${lbl}" | grep -q '"io.cubesandbox.template.writable-layer-size":"30G"' || { echo "  ✘ 30G 标签缺失" >&2; exit 1; }
+printf '%s' "${lbl}" | grep -q '"io.cubesandbox.template.writable-layer-size":"40G"' || { echo "  ✘ 40G 标签缺失" >&2; exit 1; }
 printf '%s' "${lbl}" | grep -q '"io.cubesandbox.template.cpu":"3000"' || { echo "  ✘ cpu=3000 标签缺失" >&2; exit 1; }
-printf '%s' "${lbl}" | grep -q '"io.cubesandbox.template.memory":"3000"' || { echo "  ✘ memory=3000 标签缺失" >&2; exit 1; }
-echo "  ✔ 模板标签（30G / cpu=3000 / memory=3000）"
+printf '%s' "${lbl}" | grep -q '"io.cubesandbox.template.memory":"4000"' || { echo "  ✘ memory=4000 标签缺失" >&2; exit 1; }
+printf '%s' "${lbl}" | grep -q '50005' || { echo "  ✘ 50005 端口暴露标签缺失" >&2; exit 1; }
+  echo "  ✔ 模板标签（40G / cpu=3000 / memory=4000 / exposed 50005）"
 size="$(docker image inspect "${IMG}" --format '{{.Size}}')"
 awk -v s="${size}" 'BEGIN { printf "  · 镜像体积: %.1f MB\n", s/1024/1024 }'
 

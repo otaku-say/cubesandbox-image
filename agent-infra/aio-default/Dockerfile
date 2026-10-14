@@ -1,25 +1,35 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# 项目名称：aio-default 沙箱镜像 (CubeSandbox)  v6「AOJIT 迁移对齐版」
-# 创建时间：2026-10-12
+# 项目名称：aio-default 沙箱镜像 (CubeSandbox)  v7「MCP Gateway + 最新 uv」
+# 创建时间：2026-10-15
 # 功能简述：基于 Alpine 3.23 的 MicroVM 代码执行沙箱基础镜像。
 #
-# v6 变更（对齐本地 iSH 手感；云端无 AOJIT，取 apk 源最新版即可）：
-#   1) 工具箱裁到 43 件：原 58 件中，AOJIT 内置加速的 15 件已下架
-#      （busybox/python3/curl/openssl/ssh 全家/sqlite3/socat/drill/uv）
-#   2) 下架的 15 件改由 apk 提供：python3/py3-pip/nodejs/npm/curl/openssl/
-#      sqlite/socat/drill/uv/openssh-client/bind-tools；busybox 用系统自带
-#   3) 不再替换系统 busybox（工具箱已无 busybox）；不再做 pip→uv 桥接
-#      （装真 pip，与本地 iSH 一致）
-#   4) 手感补位（人工确认保留）：jq + python3/py3-pip/py3-setuptools/
-#      py3-pillow/py3-numpy；已按「有替代」或「交互式 TUI」裁掉
-#      vim/7zip/b3sum/nnn/ncdu
+# v7 变更（CubeSandbox v0.7.3 对齐 + 上游优先安装）：
+#   1) 集成官方 mcp-gateway 服务（E2B 兼容 MCP 协议）：
+#      多阶段构建从官方源码 v0.7.3 编译 mcp-gateway 二进制；
+#      预装 MCP 服务器（time/fetch/duckduckgo/arxiv），冷启动秒级响应；
+#      暴露端口 50005，网关系约 /etc/mcp-gateway/.token
+#   2) 官方最新 uv / uvx 0.13.1 独立安装（优先上游官方发布）：
+#      卸载 apk uv（0.10.2 落后），改由 astral-sh 官方 musl 包直装 + sha256 校验；
+#      agent 高频包管理推荐走 uv，pip 仍可用做兼容保留
+#   3) agent-guide.md / bash_env.sh / smoke-test.sh 同步：
+#      全文只写镜像中真实存在的工具，不再描述已下架或不可用的命令
 #
-# 设计原则：工具层 = 工具箱 43 件（静态，与 iSH 同源同校验，直取
-#          otaku-say/ish-toolbox 的产物 commit）+ apk 系统层（编译链 /
-#          解释器 / 网络与加密 CLI）；平台契约对齐官方 base
-#          （envd :49983 / cube-entrypoint / nice / user 账号）。
+# 上游优先原则：凡 apk 系统包落后于上游官方仓库版本时（如 uv），
+# 均优先从上游官方发布通道下载最新稳定版 + sha256 强校验后安装到镜像中。
 # =============================================================================
+# ---- mcp-gateway 构建阶段（官方源码 v0.7.3，静态编译）----
+FROM golang:1.25-alpine AS mcp-build
+ARG CUBESANDBOX_REF
+RUN set -eux; \
+    apk add --no-cache git ca-certificates; \
+    git clone --depth 1 --branch ${CUBESANDBOX_REF} https://github.com/TencentCloud/CubeSandbox.git /src; \
+    cd /src/examples/mcp-gateway; \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+      go build -trimpath -ldflags '-s -w' -o /out/mcp-gateway ./cmd/mcp-gateway; \
+    /out/mcp-gateway version || true
+
+# ---- 主构建阶段 ----
 FROM alpine:3.23.6
 
 ARG ENVD_VERSION=v0.9.202610091259-41ed62c3bc4
@@ -29,6 +39,9 @@ ARG AIOD_VERSION=v0.9.2
 ARG AIOD_PLATFORM=linux-x86_64
 ARG AIOD_BASE_URL=https://aio-static.tos-cn-beijing.volces.com
 ARG ZIG_VERSION=0.17.0
+ARG UV_VERSION=0.13.1
+ARG CUBESANDBOX_REF=v0.7.3
+ARG MCP_SERVERS="time fetch duckduckgo arxiv"
 
 # ---- 1) 系统软件层（apk；取本分支最新版，不与 iSH 对齐版本号）----
 #  A. 编译基础设施与运行库
@@ -43,7 +56,7 @@ RUN set -eux; \
         jq \
         python3 py3-pip py3-setuptools py3-pillow py3-numpy \
         nodejs npm \
-        curl openssl sqlite socat drill uv bind-tools \
+        curl openssl sqlite socat drill bind-tools \
         openssh-client; \
     rm -rf /var/cache/apk/*; \
     ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
@@ -112,7 +125,25 @@ RUN set -eux; \
     chmod 0755 /usr/local/bin/cc /usr/local/bin/c++; \
     zig version
 
-# ---- 9) 基础软链接、用户权限与 Git 运行时优化 ----
+# ---- 9) uv / uvx 0.13.1（官方 musl 静态包，上游优先 + sha256 校验）----
+RUN set -eux; \
+    curl -fsSL --retry 3 "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-musl.tar.gz" -o /tmp/uv.tar.gz; \
+    ACT=$(sha256sum /tmp/uv.tar.gz | awk '{print $1}'); \
+    [ "$ACT" = "6c86040a8f045ab9adc9e3ec4cdafa03fd00e9a988ed2bf28971c7fc2d0debd0" ] || { echo "uv sha256 校验失败"; exit 1; }; \
+    tar -xzf /tmp/uv.tar.gz -C /usr/local/bin --strip-components=1; \
+    chmod 0755 /usr/local/bin/uv /usr/local/bin/uvx; \
+    rm -f /tmp/uv.tar.gz; \
+    uv --version; uvx --version
+
+# ---- 10) mcp-gateway 服务及预装常用 MCP 服务器 ----
+COPY --from=mcp-build /out/mcp-gateway /usr/local/bin/mcp-gateway
+RUN set -eux; \
+    chmod 0755 /usr/local/bin/mcp-gateway; \
+    mkdir -p /etc/mcp-gateway /var/log; \
+    mcp-gateway pull ${MCP_SERVERS}; \
+    rm -rf /root/.cache/uv
+
+# ---- 11) 基础软链接、用户权限与 Git 运行时优化 ----
 #  说明：python3/pip 由 apk 提供（不再软链工具箱）；awk 指向工具箱 gawk；
 #        bash 为工具箱静态版（Alpine 系统无 bash）。
 RUN set -eux; \
@@ -133,7 +164,7 @@ RUN set -eux; \
     git config --system pack.windowMemory 256m; \
     git config --system pack.threads 2
 
-# ---- 10) Agent 层：速查命令 / 指南 / 缺命令提示 ----
+# ---- 12) Agent 层：速查命令 / 指南 / 缺命令提示 ----
 #  pip 桥已移除（现在装的是真 pip，与本地 iSH 一致）
 COPY files/bash_env.sh /etc/bash/env.sh
 COPY files/toolbox.sh /usr/local/bin/toolbox
@@ -143,8 +174,8 @@ RUN set -eux; \
     chmod 0755 /usr/local/bin/toolbox; \
     chmod 0644 /etc/bash/env.sh /etc/motd /opt/skills/tools/AGENT-GUIDE.md
 
-# ---- 11) 环境变量（PATH 与 iSH 一致；TZ；v2 面；三核口径）----
-ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin \
+# ---- 13) 环境变量（PATH 含 uv 工具目录；TZ；v2 面；三核口径）----
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/root/.local/bin \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     TZ=Asia/Shanghai \
@@ -159,9 +190,9 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin \
     MAKEFLAGS=-j3 \
     BASH_ENV=/etc/bash/env.sh
 
-# ---- 12) 运行时配置、工作目录与健康检查探针 ----
+# ---- 14) 运行时配置、工作目录与健康检查探针 ----
 WORKDIR /workspace
-EXPOSE 49983 8080
+EXPOSE 49983 8080 50005
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=12 \
     CMD curl -fsS "http://127.0.0.1:49983/health" >/dev/null || exit 1
@@ -169,12 +200,12 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cube-entrypoint.sh"]
 CMD ["/usr/local/bin/aiod", "start"]
 
 LABEL org.opencontainers.image.title="CubeSandbox code sandbox (aio-default)" \
-      org.opencontainers.image.description="iSH 同源 Alpine 沙箱 v6：alpine 3.23.6 + ish-toolbox 43 件 + apk 系统层（python3/nodejs/curl/openssl/git/zig）" \
+      org.opencontainers.image.description="CubeSandbox v0.7.3 对齐：alpine 3.23.6 + ish-toolbox 43 件 + mcp-gateway + uv 0.13.1 + apk 系统层" \
       org.opencontainers.image.source="https://github.com/otaku-say/cubesandbox-image" \
       io.cubesandbox.envd.ref="${ENVD_VERSION}" \
       io.cubesandbox.toolbox.ref="otaku-say/ish-toolbox@${TOOLBOX_REF}" \
-      io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080],"probePort":49983,"probePath":"/health","writableLayerSize":"40G","cpu":3000,"memory":4000,"alias":"aio-default","notes":"iSH 同源：alpine 3.23.6 + 工具箱 43 件 + apk 系统层"}' \
-      io.cubesandbox.template.exposed-ports="49983,8080" \
+      io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080,50005],"probePort":49983,"probePath":"/health","writableLayerSize":"40G","cpu":3000,"memory":4000,"alias":"aio-default","notes":"CubeSandbox v0.7.3：alpine 3.23.6 + 工具箱 43 件 + mcp-gateway + uv 0.13.1 + apk 系统层"}' \
+      io.cubesandbox.template.exposed-ports="49983,8080,50005" \
       io.cubesandbox.template.probe-port="49983" \
       io.cubesandbox.template.probe-path="/health" \
       io.cubesandbox.template.writable-layer-size="40G" \
