@@ -20,7 +20,7 @@
 # =============================================================================
 # ---- mcp-gateway 构建阶段（官方源码 v0.7.3，静态编译）----
 FROM golang:1.25-alpine AS mcp-build
-ARG CUBESANDBOX_REF
+ARG CUBESANDBOX_REF=v0.7.3
 RUN set -eux; \
     apk add --no-cache git ca-certificates; \
     git clone --depth 1 --branch ${CUBESANDBOX_REF} https://github.com/TencentCloud/CubeSandbox.git /src; \
