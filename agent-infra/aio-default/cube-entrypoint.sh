@@ -4,10 +4,13 @@
 # Contract:
 #   1. Always start envd in the background on ${ENVD_PORT:-49983} so that
 #      CubeMaster's readiness probe (:49983/health) passes within ~1s.
-#   2. If a user CMD is provided (i.e. $# > 0), exec it as the foreground
+#   2. Optional xerj service: by default on-demand lazy activation is used
+#      via the /usr/local/bin/xerj wrapper (0 initial RAM). If XERJ_AUTOSTART=1,
+#      start it at boot.
+#   3. If a user CMD is provided (i.e. $# > 0), exec it as the foreground
 #      process; envd stays alive in the background. On SIGTERM/SIGINT we
 #      forward the signal to the user process; envd is reaped by tini.
-#   3. If no CMD is provided, wait on envd as the foreground process so the
+#   4. If no CMD is provided, wait on envd as the foreground process so the
 #      container stays up as a pure envd sandbox.
 #
 # Environment variables:
@@ -17,6 +20,7 @@
 #   ENVD_LOG_FILE   Where to redirect envd stdout/stderr (default:
 #                   /var/log/envd.log). Set to "-" to inherit the container
 #                   stdio.
+#   XERJ_AUTOSTART  Set to 1 or true to eagerly start xerj at boot (default: 0).
 
 set -eu
 
@@ -40,14 +44,22 @@ start_envd() {
         "${ENVD_BIN}" -port "${ENVD_PORT}" ${ENVD_EXTRA_ARGS} &
     else
         mkdir -p "$(dirname "${ENVD_LOG_FILE}")"
-        "${ENVD_BIN}" -port "${ENVD_PORT}" ${ENVD_EXTRA_ARGS} \
-            >>"${ENVD_LOG_FILE}" 2>&1 &
+        "${ENVD_BIN}" -port "${ENVD_PORT}" ${ENVD_EXTRA_ARGS}             >>"${ENVD_LOG_FILE}" 2>&1 &
     fi
     ENVD_PID=$!
     echo "cube-entrypoint: started envd (pid=${ENVD_PID}) on port ${ENVD_PORT}" >&2
 }
 
 start_envd
+
+# Optional eager start for xerj if XERJ_AUTOSTART is set
+case "${XERJ_AUTOSTART:-0}" in
+    1|true|yes)
+        if [ -x /usr/local/bin/xerj-service ]; then
+            /usr/local/bin/xerj-service start || true
+        fi
+        ;;
+esac
 
 # cube-cli 会话目录兜底：pty-open 的 script(1) 直接 open 日志文件，
 # 目录缺失即退出（2026-10-10 实锤：pid 起了即死、.log 未落盘）。
@@ -68,6 +80,9 @@ fi
 USER_PID=""
 forward_signal() {
     sig="$1"
+    if [ -x /usr/local/bin/xerj-service ]; then
+        /usr/local/bin/xerj-service stop >/dev/null 2>&1 || true
+    fi
     if [ -n "${USER_PID}" ]; then
         kill -s "${sig}" "${USER_PID}" 2>/dev/null || true
     fi

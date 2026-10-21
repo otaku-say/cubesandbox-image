@@ -1,3 +1,21 @@
+# aio-default v8 重建记录（2026-10-21：XERJ 智能检索与透明按需激活）
+
+## v8 核心架构决策
+
+1. **上游优先独立安装 XERJ**：
+   - 官方 musl 静态二进制（动态追踪最新 Release：XERJ_VERSION=latest）；
+   - 官方安装器自带 sha256 强校验，不污染轻量工具箱（保持工具箱 43 件独立精简）；
+   - 独立端口 9200（ES 协议）、9201（Native REST）、9202（gRPC），避开 aiod 8080 与 envd 49983。
+2. **透明惰性按需激活（Lazy Activation）**：
+   - 冷启动 0 内存 0 CPU（默认不后台拉起）；
+   - /usr/local/bin/xerj 包装层在首次执行 search / autoindex / def / mcp 时透明自愈拉起（~200ms），无任何 Connection Refused 报错；
+   - 任务结束后可通过 xerj-service stop 彻底释放内存；沙箱退出时通过 cube-entrypoint.sh 转发 SIGTERM 优雅退出。
+3. **工作区 Agent 全面武装**：
+   - /workspace 预置 .mcp.json（17 个原生工具）与 AGENTS.md；
+   - 指南与环境变量引导 Agent 减少盲目 grep，优先精准代码段召回（节省 2.7x Token）。
+
+---
+
 # aio-default v5 重建记录（2026-10-09；2026-10-10 小修复见末节）
 
 ## 决策与来源（全部实测核验）

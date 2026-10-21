@@ -1,0 +1,104 @@
+#!/bin/sh
+# /usr/local/bin/xerj-service —— xerj 后台服务管理脚本
+set -eu
+
+XERJ_BIN="${XERJ_BIN:-/usr/local/bin/xerj-real}"
+XERJ_PORT="${XERJ_PORT:-9200}"
+XERJ_DATA_DIR="${XERJ_DATA_DIR:-/var/lib/xerj/data}"
+XERJ_LOG_FILE="${XERJ_LOG_FILE:-/var/log/xerj.log}"
+XERJ_PID_FILE="${XERJ_PID_FILE:-/tmp/.xerj.pid}"
+
+is_running() {
+    if curl -fsS -m 1 "http://127.0.0.1:${XERJ_PORT}/" >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ -f "${XERJ_PID_FILE}" ]; then
+        pid=$(cat "${XERJ_PID_FILE}" 2>/dev/null || true)
+        if [ -n "${pid}" ] && ! kill -0 "${pid}" 2>/dev/null; then
+            rm -f "${XERJ_PID_FILE}"
+        fi
+    fi
+    return 1
+}
+
+start_service() {
+    if is_running; then
+        echo "xerj is already running on port ${XERJ_PORT}"
+        return 0
+    fi
+    if [ ! -x "${XERJ_BIN}" ]; then
+        echo "error: xerj binary not found or not executable at ${XERJ_BIN}" >&2
+        return 1
+    fi
+    mkdir -p "${XERJ_DATA_DIR}" "$(dirname "${XERJ_LOG_FILE}")"
+    chmod 0777 "${XERJ_DATA_DIR}" "$(dirname "${XERJ_DATA_DIR}")" 2>/dev/null || true
+
+    export XERJ_ALLOW_INSECURE_NETWORK_BIND=true
+    export XERJ_DISABLE_FEEDBACK=true
+    nohup "${XERJ_BIN}" --insecure --bind 0.0.0.0 --port "${XERJ_PORT}" --data-dir "${XERJ_DATA_DIR}"         >>"${XERJ_LOG_FILE}" 2>&1 &
+    pid=$!
+    echo "${pid}" > "${XERJ_PID_FILE}"
+
+    for i in $(seq 1 50); do
+        if curl -fsS -m 0.2 "http://127.0.0.1:${XERJ_PORT}/" >/dev/null 2>&1; then
+            echo "xerj started (pid=${pid}) on port ${XERJ_PORT}"
+            return 0
+        fi
+        usleep 100000 2>/dev/null || sleep 0.1 2>/dev/null || sleep 1
+    done
+    echo "error: xerj failed to start within 5s, check ${XERJ_LOG_FILE}" >&2
+    return 1
+}
+
+stop_service() {
+    if ! is_running; then
+        echo "xerj is not running"
+        rm -f "${XERJ_PID_FILE}"
+        return 0
+    fi
+    pid=""
+    if [ -f "${XERJ_PID_FILE}" ]; then
+        pid=$(cat "${XERJ_PID_FILE}" 2>/dev/null || true)
+    fi
+    if [ -n "${pid}" ]; then
+        kill -TERM "${pid}" 2>/dev/null || true
+    else
+        pkill -TERM -f "${XERJ_BIN}" 2>/dev/null || true
+    fi
+    for i in $(seq 1 30); do
+        if ! curl -fsS -m 0.2 "http://127.0.0.1:${XERJ_PORT}/" >/dev/null 2>&1; then
+            rm -f "${XERJ_PID_FILE}"
+            echo "xerj stopped"
+            return 0
+        fi
+        usleep 100000 2>/dev/null || sleep 0.1 2>/dev/null || sleep 1
+    done
+    echo "xerj did not stop cleanly, sending KILL" >&2
+    if [ -n "${pid}" ]; then kill -KILL "${pid}" 2>/dev/null || true; fi
+    pkill -KILL -f "${XERJ_BIN}" 2>/dev/null || true
+    rm -f "${XERJ_PID_FILE}"
+    return 0
+}
+
+case "${1:-status}" in
+    start) start_service ;;
+    stop) stop_service ;;
+    restart) stop_service; start_service ;;
+    ensure)
+        if ! is_running; then
+            start_service >/dev/null 2>&1
+        fi
+        ;;
+    status)
+        if is_running; then
+            echo "xerj is running on port ${XERJ_PORT}"
+        else
+            echo "xerj is not running"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|ensure|status}" >&2
+        exit 1
+        ;;
+esac

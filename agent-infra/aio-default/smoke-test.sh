@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aio-default 冒烟测试（v6）—— 构建后容器级验收（需要 docker）
+# aio-default 冒烟测试（v8）—— 构建后容器级验收（需要 docker）
 # 用法: ./smoke-test.sh <image>
 # 覆盖：探针/v2 API（v1 应关闭）/ 内部一致性（3.23.6、系统 busybox、TZ=+0800、
 #       真 pip + pillow/numpy）/ 工具箱 43 件全量探测 + 清单校验 + 15 件下架验证 /
 #       tini 信号 / tmux 后端 / v2 命令通道端到端（rg/python/jaq）/ Agent 层 /
-#       开发链（git 2.56、zig、gh、git-lfs、uv）/ LABEL 与体积
+#       开发链（git 2.56、zig、gh、git-lfs、uv）/ XERJ 按需自愈与释放 / LABEL 与体积
 # =============================================================================
 set -euo pipefail
 
@@ -14,8 +14,8 @@ NAME="aiodef-smoke-$$"
 cleanup() { docker rm -f "${NAME}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-echo "== [1/9] 启动测试容器 ${NAME} =="
-docker run -d --name "${NAME}" -p 49983:49983 -p 8080:8080 "${IMG}" >/dev/null
+echo "== [1/10] 启动测试容器 ${NAME} =="
+docker run -d --name "${NAME}" -p 49983:49983 -p 8080:8080 -p 9200:9200 "${IMG}" >/dev/null
 
 need() { # <描述> <url> <期望码> [limit]
   local desc="$1" url="$2" want="$3" limit="${4:-60}" i code
@@ -29,7 +29,7 @@ need() { # <描述> <url> <期望码> [limit]
   return 1
 }
 
-echo "== [2/9] 平台探针与 v2 API =="
+echo "== [2/10] 平台探针与 v2 API =="
 need "envd :49983/health（平台探针）" "http://127.0.0.1:49983/health" 204 60
 need "aiod :8080/health" "http://127.0.0.1:8080/health" 200 60
 v2="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/v2/sandbox)"
@@ -43,23 +43,26 @@ else
   echo "  ✔ 18091 未监听（单端口收敛）"
 fi
 
-echo "== [3/9] 镜像内部一致性 =="
+echo "== [3/10] 镜像内部一致性 =="
 docker exec "${NAME}" sh -c '
 set -eu
 [ "$(cat /etc/alpine-release)" = "3.23.6" ] || { echo "alpine 版本不符: $(cat /etc/alpine-release)" >&2; exit 1; }
-[ "$PATH" = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" ] || { echo "PATH 不符: $PATH" >&2; exit 1; }
+[ "$PATH" = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/root/.local/bin" ] || { echo "PATH 不符: $PATH" >&2; exit 1; }
 for f in /bin/bash /usr/bin/python3 /usr/bin/pip /usr/bin/tini /usr/local/bin/aiod /usr/bin/curl \
          /usr/bin/git /usr/local/bin/zig /usr/bin/gh /usr/bin/git-lfs /usr/local/bin/toolbox \
-         /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/mcp-gateway; do
+         /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/mcp-gateway \
+         /usr/local/bin/xerj-real /usr/local/bin/xerj /usr/local/bin/xerj-service; do
   [ -e "$f" ] || { echo "$f 缺失" >&2; exit 1; }
 done
 uv --version | grep -q "0.13.1" || { echo "uv 版本不是 0.13.1: $(uv --version)" >&2; exit 1; }
 mcp-gateway catalog | grep -q "duckduckgo" || { echo "mcp-gateway catalog 异常" >&2; exit 1; }
-# 系统 busybox 保持原版（v6 不再用工具箱 busybox 替换）
+# 系统 busybox 保持原版
 /bin/busybox | head -1 | grep -q "BusyBox v1.3" || { echo "系统 busybox 异常: $(/bin/busybox | head -1)" >&2; exit 1; }
 [ "$(date +%z)" = "+0800" ] || { echo "TZ 未生效: $(date +%z)" >&2; exit 1; }
 [ "${AIO_API_SURFACE:-}" = "v2" ] || { echo "AIO_API_SURFACE != v2" >&2; exit 1; }
 [ -d /workspace ] && [ -w /workspace ] || { echo "/workspace 缺失或不可写" >&2; exit 1; }
+[ -f /workspace/.mcp.json ] && grep -q "xerj" /workspace/.mcp.json || { echo "/workspace/.mcp.json 缺失或缺 xerj" >&2; exit 1; }
+[ -f /workspace/AGENTS.md ] || { echo "/workspace/AGENTS.md 缺失" >&2; exit 1; }
 command -v sudo >/dev/null || { echo "sudo 缺失" >&2; exit 1; }
 [ -d /tmp/.cube-cli-pty ] || { echo "cube-cli PTY 会话目录缺失" >&2; exit 1; }
 [ -d /tmp/.cube-cli-exec ] || { echo "cube-cli exec 会话目录缺失" >&2; exit 1; }
@@ -73,11 +76,18 @@ grep -q "^/bin/bash$" /etc/shells || { echo "/etc/shells 未登记 /bin/bash" >&
 ! grep -q "@edge" /etc/apk/world || { echo "apk world 残留 @edge" >&2; exit 1; }
 ! grep -q "@edge" /etc/apk/repositories || { echo "repositories 残留 @edge" >&2; exit 1; }
 apk add --simulate file >/dev/null 2>&1 || { echo "apk 不可用（world 依赖异常）" >&2; exit 1; }
+
+# 验证 XERJ 默认按需未拉起（0 内存消耗）
+if curl -s -o /dev/null --max-time 1 http://127.0.0.1:9200/; then
+  echo "  ✘ 9200 端口开机即监听（期望默认按需惰性激活）" >&2; exit 1
+else
+  echo "  ✔ 9200 默认未监听（惰性按需生效）"
+fi
 printf "  · %s / PATH 一致 / TZ=%s / pwd=%s\n" "$(cat /etc/alpine-release)" "$(date +%z)" "$(pwd)"
 printf "  · busybox(系统)=%s\n" "$(/bin/busybox | head -1)"
 '
 
-echo "== [4/9] Python 栈与 AOJIT 迁移位（真 pip / pillow / numpy；15 件已下架） =="
+echo "== [4/10] Python 栈与 AOJIT 迁移位（真 pip / pillow / numpy；15 件已下架） =="
 docker exec "${NAME}" sh -c '
 set -eu
 p="$(pip --version 2>&1 || true)"
@@ -91,7 +101,7 @@ done
 echo "  ✔ 15 件下架位确认（工具箱内不存在）"
 '
 
-echo "== [5/9] 工具箱全量探测（动态比对数量）+ 清单校验 =="
+echo "== [5/10] 工具箱全量探测（动态比对数量）+ 清单校验 =="
 docker exec "${NAME}" sh -c '
 set -eu
 n=0; bad=""
@@ -120,7 +130,7 @@ done
 echo "  ✔ 工具箱优先链路（抽查 25 项全部命中 /opt/skills/tools）"
 '
 
-echo "== [6/9] tini 信号链路 =="
+echo "== [6/10] tini 信号链路 =="
 docker exec "${NAME}" sh -c 'tini --version | sed "s/^/  · /"'
 docker exec "${NAME}" sh -c 'nohup tini -- sleep 60 >/dev/null 2>&1 & echo $! > /tmp/tinip; echo started' >/dev/null
 sleep 1
@@ -132,7 +142,7 @@ if kill -0 "$tp" 2>/dev/null; then echo "  ✘ tini 未响应 TERM" >&2; exit 1;
 echo "  ✔ tini 存活 → TERM → 退出（信号转发链路正常）"
 '
 
-echo "== [7/9] aiod shell 后端断言（工具箱 tmux 3.8） =="
+echo "== [7/10] aiod shell 后端断言（工具箱 tmux 3.8） =="
 docker exec "${NAME}" tmux -V | grep -q "3\.8" || { echo "  ✘ tmux 版本异常" >&2; exit 1; }
 tmux_ok=0
 for _ in $(seq 1 20); do
@@ -142,7 +152,7 @@ done
 [ "${tmux_ok}" = "1" ] || { echo "  ✘ tmux backend 未激活" >&2; docker logs "${NAME}" 2>&1 | tail -20 >&2; exit 1; }
 echo "  ✔ $(docker exec "${NAME}" tmux -V) ；shell backend = tmux"
 
-echo "== [8/9] v2 命令通道 + Agent 层与开发链 =="
+echo "== [8/10] v2 命令通道 + Agent 层与开发链 =="
 cat > /tmp/v2cmd.json <<'JSONEOF'
 {"command":"echo SMOKE=$0; pwd; rg --version | head -1; python3 -c \"print(6*7)\"; echo '{\"a\":12345}' | jaq -r .a; uv --version"}
 JSONEOF
@@ -176,13 +186,43 @@ sudo -u user sudo -n id 2>/dev/null | grep -q "uid=0" || { echo "  ✘ user 免�
 echo "  ✔ git 提交/日志、zig cc 编译运行、gh/git-lfs/uv/node、toolbox、缺命令提示、user 免密 sudo 全部可用"
 '
 
-echo "== [9/9] LABEL 与体积 =="
+echo "== [9/10] XERJ 透明惰性自愈激活与内存释放 =="
+docker exec "${NAME}" bash -c '
+set -eu
+# 1. 帮助与版本不应唤醒服务
+v=$(xerj --version)
+echo "  · xerj version: $v"
+! curl -s -o /dev/null --max-time 1 http://127.0.0.1:9200/ || { echo "  ✘ xerj --version 意外拉起了服务" >&2; exit 1; }
+
+# 2. 模拟一个测试项目
+mkdir -p /tmp/xerj-smoke-repo
+echo "fn calculateTaxRate() { return 0.15; }" > /tmp/xerj-smoke-repo/tax.rs
+echo "# CubeSandbox Documentation" > /tmp/xerj-smoke-repo/README.md
+
+# 3. 首次调用 autoindex 自动触发服务拉起并建索引
+xerj autoindex /tmp/xerj-smoke-repo --bulk-mb 4 >/dev/null
+curl -fsS http://127.0.0.1:9200/ | grep -q "You Know, for Search" || { echo "  ✘ xerj 服务未就绪" >&2; exit 1; }
+echo "  ✔ 首次调用 autoindex 成功自动拉起 9200 服务"
+
+# 4. 执行 search 检索
+out=$(xerj search "calculateTaxRate")
+echo "$out" | grep -q "tax.rs" || { echo "  ✘ xerj search 未召回目标代码: $out" >&2; exit 1; }
+echo "  ✔ xerj search 代码段召回验证通过"
+
+# 5. 执行 stop 释放内存
+xerj-service stop >/dev/null
+! curl -s -o /dev/null --max-time 1 http://127.0.0.1:9200/ || { echo "  ✘ xerj-service stop 未能停机" >&2; exit 1; }
+echo "  ✔ xerj-service stop 成功释放 9200 端口与内存"
+'
+
+echo "== [10/10] LABEL 与体积 =="
 lbl="$(docker image inspect "${IMG}" --format '{{json .Config.Labels}}')"
 printf '%s' "${lbl}" | grep -q '"io.cubesandbox.template.writable-layer-size":"40G"' || { echo "  ✘ 40G 标签缺失" >&2; exit 1; }
 printf '%s' "${lbl}" | grep -q '"io.cubesandbox.template.cpu":"3000"' || { echo "  ✘ cpu=3000 标签缺失" >&2; exit 1; }
 printf '%s' "${lbl}" | grep -q '"io.cubesandbox.template.memory":"4000"' || { echo "  ✘ memory=4000 标签缺失" >&2; exit 1; }
 printf '%s' "${lbl}" | grep -q '50005' || { echo "  ✘ 50005 端口暴露标签缺失" >&2; exit 1; }
-  echo "  ✔ 模板标签（40G / cpu=3000 / memory=4000 / exposed 50005）"
+printf '%s' "${lbl}" | grep -q '9200' || { echo "  ✘ 9200 端口暴露标签缺失" >&2; exit 1; }
+echo "  ✔ 模板标签（40G / cpu=3000 / memory=4000 / exposed 50005,9200）"
 size="$(docker image inspect "${IMG}" --format '{{.Size}}')"
 awk -v s="${size}" 'BEGIN { printf "  · 镜像体积: %.1f MB\n", s/1024/1024 }'
 

@@ -1,21 +1,21 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# 项目名称：aio-default 沙箱镜像 (CubeSandbox)  v7「MCP Gateway + 最新 uv」
-# 创建时间：2026-10-15
+# 项目名称：aio-default 沙箱镜像 (CubeSandbox)  v8「XERJ 智能检索 + MCP Gateway + uv」
+# 创建时间：2026-10-21
 # 功能简述：基于 Alpine 3.23 的 MicroVM 代码执行沙箱基础镜像。
 #
-# v7 变更（CubeSandbox v0.7.3 对齐 + 上游优先安装）：
-#   1) 集成官方 mcp-gateway 服务（E2B 兼容 MCP 协议）：
-#      多阶段构建从官方源码 v0.7.3 编译 mcp-gateway 二进制；
-#      预装 MCP 服务器（time/fetch/duckduckgo/arxiv），冷启动秒级响应；
-#      暴露端口 50005，网关系约 /etc/mcp-gateway/.token
-#   2) 官方最新 uv / uvx 0.13.1 独立安装（优先上游官方发布）：
-#      卸载 apk uv（0.10.2 落后），改由 astral-sh 官方 musl 包直装 + sha256 校验；
-#      agent 高频包管理推荐走 uv，pip 仍可用做兼容保留
-#   3) agent-guide.md / bash_env.sh / smoke-test.sh 同步：
-#      全文只写镜像中真实存在的工具，不再描述已下架或不可用的命令
+# v8 变更（AI-Native 搜索引擎 XERJ 集成）：
+#   1) 集成最新版 XERJ（单文件 musl 静态二进制，上游优先，动态拉取最新 Release）：
+#      真实二进制置于 /usr/local/bin/xerj-real；
+#      提供 /usr/local/bin/xerj 透明惰性包装器：平时 0 内存 0 CPU 占用，
+#      首次触发 autoindex / search / def / mcp 时秒级自愈拉起（~200ms），
+#      并提供 xerj-service 便捷管理与按需 stop 释放内存；
+#      暴露端口 9200（兼容 Elasticsearch 8.x 协议），避开 aiod 8080 端口。
+#   2) 工作区 Agent 引导与 MCP 预置：
+#      在 /workspace 预置 .mcp.json（内置 17 个 xerj 工具）与 AGENTS.md；
+#      在 AGENT-GUIDE.md、motd 与 bash_env.sh 注入推荐检索习惯。
 #
-# 上游优先原则：凡 apk 系统包落后于上游官方仓库版本时（如 uv），
+# 上游优先原则：凡 apk 系统包落后于上游官方仓库版本时（如 uv / xerj），
 # 均优先从上游官方发布通道下载最新稳定版 + sha256 强校验后安装到镜像中。
 # =============================================================================
 # ---- mcp-gateway 构建阶段（官方源码 v0.7.3，静态编译）----
@@ -40,6 +40,7 @@ ARG AIOD_PLATFORM=linux-x86_64
 ARG AIOD_BASE_URL=https://aio-static.tos-cn-beijing.volces.com
 ARG ZIG_VERSION=0.17.0
 ARG UV_VERSION=0.13.1
+ARG XERJ_VERSION=latest
 ARG CUBESANDBOX_REF=v0.7.3
 ARG MCP_SERVERS="time fetch duckduckgo arxiv"
 
@@ -76,7 +77,7 @@ RUN set -eux; \
     mkdir -p /var/log; \
     /usr/bin/envd -version
 
-# ---- 4) cube-entrypoint.sh（官方 master 版，vendored）----
+# ---- 4) cube-entrypoint.sh（支持 XERJ 优雅停机与可选自启）----
 COPY cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/cube-entrypoint.sh
 
@@ -135,7 +136,22 @@ RUN set -eux; \
     rm -f /tmp/uv.tar.gz; \
     uv --version; uvx --version
 
-# ---- 10) mcp-gateway 服务及预装常用 MCP 服务器 ----
+# ---- 10) xerj（官方 musl 静态二进制，上游最新 + 透明按需启动包装）----
+#   默认取 latest 最新稳定版（重新打包时自动解析上游最新 Release + sha256 强校验）
+#   真实二进制置于 /usr/local/bin/xerj-real，包装入口 /usr/local/bin/xerj 支持惰性秒级自愈激活
+RUN set -eux; \
+    if [ "${XERJ_VERSION}" = "latest" ]; then \
+        curl -fsSL --retry 3 https://xerj.org/get | XERJ_INSTALL_DIR=/usr/local/bin XERJ_LIBC=musl sh; \
+    else \
+        curl -fsSL --retry 3 https://xerj.org/get | XERJ_VERSION="${XERJ_VERSION}" XERJ_INSTALL_DIR=/usr/local/bin XERJ_LIBC=musl sh; \
+    fi; \
+    mv /usr/local/bin/xerj /usr/local/bin/xerj-real; \
+    chmod 0755 /usr/local/bin/xerj-real; \
+    mkdir -p /var/lib/xerj/data /var/log; \
+    chmod 0777 /var/lib/xerj /var/lib/xerj/data; \
+    /usr/local/bin/xerj-real --version
+
+# ---- 11) mcp-gateway 服务及预装常用 MCP 服务器 ----
 COPY --from=mcp-build /out/mcp-gateway /usr/local/bin/mcp-gateway
 RUN set -eux; \
     chmod 0755 /usr/local/bin/mcp-gateway; \
@@ -143,7 +159,7 @@ RUN set -eux; \
     mcp-gateway pull ${MCP_SERVERS}; \
     rm -rf /root/.cache/uv
 
-# ---- 11) 基础软链接、用户权限与 Git 运行时优化 ----
+# ---- 12) 基础软链接、用户权限与 Git 运行时优化 ----
 #  说明：python3/pip 由 apk 提供（不再软链工具箱）；awk 指向工具箱 gawk；
 #        bash 为工具箱静态版（Alpine 系统无 bash）。
 RUN set -eux; \
@@ -164,17 +180,22 @@ RUN set -eux; \
     git config --system pack.windowMemory 256m; \
     git config --system pack.threads 2
 
-# ---- 12) Agent 层：速查命令 / 指南 / 缺命令提示 ----
-#  pip 桥已移除（现在装的是真 pip，与本地 iSH 一致）
+# ---- 13) Agent 层：速查命令 / 指南 / 缺命令提示 / XERJ 服务与 MCP ----
 COPY files/bash_env.sh /etc/bash/env.sh
 COPY files/toolbox.sh /usr/local/bin/toolbox
 COPY files/motd /etc/motd
+COPY files/xerj-service /usr/local/bin/xerj-service
+COPY files/xerj-wrapper.sh /usr/local/bin/xerj
+COPY files/workspace-mcp.json /workspace/.mcp.json
+COPY files/workspace-agents.md /workspace/AGENTS.md
 COPY agent-guide.md /opt/skills/tools/AGENT-GUIDE.md
 RUN set -eux; \
-    chmod 0755 /usr/local/bin/toolbox; \
-    chmod 0644 /etc/bash/env.sh /etc/motd /opt/skills/tools/AGENT-GUIDE.md
+    chmod 0755 /usr/local/bin/toolbox /usr/local/bin/xerj-service /usr/local/bin/xerj; \
+    chmod 0644 /etc/bash/env.sh /etc/motd /opt/skills/tools/AGENT-GUIDE.md /workspace/.mcp.json /workspace/AGENTS.md; \
+    chown -R user:user /workspace; \
+    /usr/local/bin/xerj --version
 
-# ---- 13) 环境变量（PATH 含 uv 工具目录；TZ；v2 面；三核口径）----
+# ---- 14) 环境变量（PATH 含 uv 工具目录；TZ；v2 面；三核口径；XERJ）----
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/root/.local/bin \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -188,11 +209,13 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/
     PIP_BREAK_SYSTEM_PACKAGES=1 \
     UV_CONCURRENT_INSTALLS=3 \
     MAKEFLAGS=-j3 \
-    BASH_ENV=/etc/bash/env.sh
+    BASH_ENV=/etc/bash/env.sh \
+    XERJ_URL=http://127.0.0.1:9200 \
+    XERJ_DISABLE_FEEDBACK=true
 
-# ---- 14) 运行时配置、工作目录与健康检查探针 ----
+# ---- 15) 运行时配置、工作目录与健康检查探针 ----
 WORKDIR /workspace
-EXPOSE 49983 8080 50005
+EXPOSE 49983 8080 50005 9200
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=12 \
     CMD curl -fsS "http://127.0.0.1:49983/health" >/dev/null || exit 1
@@ -200,12 +223,12 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cube-entrypoint.sh"]
 CMD ["/usr/local/bin/aiod", "start"]
 
 LABEL org.opencontainers.image.title="CubeSandbox code sandbox (aio-default)" \
-      org.opencontainers.image.description="CubeSandbox v0.7.3 对齐：alpine 3.23.6 + ish-toolbox 43 件 + mcp-gateway + uv 0.13.1 + apk 系统层" \
+      org.opencontainers.image.description="CubeSandbox v0.7.3 对齐：alpine 3.23.6 + ish-toolbox 43 件 + mcp-gateway + uv 0.13.1 + xerj(按需自启) + apk 系统层" \
       org.opencontainers.image.source="https://github.com/otaku-say/cubesandbox-image" \
       io.cubesandbox.envd.ref="${ENVD_VERSION}" \
       io.cubesandbox.toolbox.ref="otaku-say/ish-toolbox@${TOOLBOX_REF}" \
-      io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080,50005],"probePort":49983,"probePath":"/health","writableLayerSize":"40G","cpu":3000,"memory":4000,"alias":"aio-default","notes":"CubeSandbox v0.7.3：alpine 3.23.6 + 工具箱 43 件 + mcp-gateway + uv 0.13.1 + apk 系统层"}' \
-      io.cubesandbox.template.exposed-ports="49983,8080,50005" \
+      io.cubesandbox.template.defaults='{"exposedPorts":[49983,8080,50005,9200],"probePort":49983,"probePath":"/health","writableLayerSize":"40G","cpu":3000,"memory":4000,"alias":"aio-default","notes":"CubeSandbox v0.7.3：alpine 3.23.6 + 工具箱 43 件 + mcp-gateway + uv 0.13.1 + xerj + apk 系统层"}' \
+      io.cubesandbox.template.exposed-ports="49983,8080,50005,9200" \
       io.cubesandbox.template.probe-port="49983" \
       io.cubesandbox.template.probe-path="/health" \
       io.cubesandbox.template.writable-layer-size="40G" \

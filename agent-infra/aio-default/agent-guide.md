@@ -5,6 +5,7 @@
 > 2. **apk 系统层**（解释器、编译工具链、网络与系统工具）
 > 3. **最新独立 uv / uvx 工具链**（极速 Python 包管理与工具运行器）
 > 4. **官方 mcp-gateway 服务**（E2B 兼容的 MCP 服务协议，支持内置/GitHub/自定义工具）
+> 5. **AI-Native 搜索引擎 XERJ**（Elasticsearch 8.x 协议兼容、透明惰性按需激活、代码段/定义检索与 17 个 MCP 工具）
 
 ---
 
@@ -15,13 +16,20 @@
 | **envd** | `49983` | CubeSandbox 控制与执行协议，健康探针端点 `/health` |
 | **aiod** | `8080` | 数据面 API 服务（AIO v2 接口） |
 | **mcp-gateway** | `50005` | E2B 兼容的 MCP 流式 HTTP 网关端点 `/mcp`，`/health` 探针 |
+| **xerj** | `9200` | Elasticsearch 8.x 兼容的 AI-native 搜索引擎（透明惰性按需激活，开机 0 内存，首次调用自动秒级就绪） |
 
 ---
 
 ## 2. 真实可用工具分类
 
-### 文本搜索与处理
-- `rg`：ripgrep，大代码库快速搜索首选
+### 智能搜索与代码检索（首选）
+- **`xerj`**：AI-Native 搜索引擎与代码段精准召回（**强力推荐：避免盲目 grep 撑爆上下文**）
+  - `xerj autoindex <目录>`：对代码库、文档、日志一键零配置建索引（1~2秒完成）
+  - `xerj search "<搜索词或描述>"`：定义优先加权、仅返回行号与关键代码块（相比 grep 节省 2.7x Token）
+  - `xerj def "<符号名>"`：跨文件直达函数/类/常量定义处
+  - `xerj ask "<问题>"`：从语料库中检索开源实现范式
+  - `xerj-service {start|stop|status}`：服务生命周期管理，任务结束可 `stop` 彻底释放内存
+- `rg`：ripgrep，单文件或小目录极简正则匹配
 - `fd`：简单目录与文件查找首选
 - `jaq` / `jq`：JSON 处理（两者皆可用）
 - `yq`：YAML / JSON 通用转换与查询
@@ -52,10 +60,9 @@
 - `curl`、`openssl`、`drill`、`dig`、`socat`、`sqlite3`
 - `openssh-client`（`ssh`、`scp`、`sftp`、`ssh-keygen` 等）
 
-### MCP Gateway
-- **`mcp-gateway`**：沙箱内部 MCP 聚合网关
-  - `mcp-gateway catalog`：查看支持的预装 MCP 服务（`duckduckgo`、`fetch`、`time`、`arxiv`、`filesystem`、`memory`、`sequentialthinking`）
-  - 支持 `mcp-gateway --config '<json>'`（E2B 规范）自动拉起后台服务并写入 `/etc/mcp-gateway/.token`
+### MCP Gateway & MCP 工具
+- **`mcp-gateway`**：沙箱内部 MCP 聚合网关（端口 50005）
+- **XERJ MCP**：`/workspace/.mcp.json` 已预置 xerj stdio 服务，提供 `xerj_search`、`xerj_def`、`xerj_code_search` 等 17 个原生工具
 
 ### 终端与进程控制
 - `tmux`、`tini`、`pstree`、`faketty`、`chronic`、`sponge`、`tree`、`bash`
@@ -63,6 +70,21 @@
 ---
 
 ## 3. 高频使用模式与技巧
+
+### 代码排查与大文本检索（军规推荐）
+```sh
+# 1. 遇到复杂项目或多文件排查，先建立索引（秒级完成）：
+xerj autoindex /workspace/<项目目录>
+
+# 2. 搜索关键逻辑或报错（仅返回关键上下文代码块，绝不撑爆屏幕）：
+xerj search "handleConnection"
+
+# 3. 直达函数定义：
+xerj def "handleConnection"
+
+# 4. 任务结束若需释放内存：
+xerj-service stop
+```
 
 ### Python 包管理与运行
 ```sh
