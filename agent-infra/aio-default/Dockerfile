@@ -140,11 +140,12 @@ RUN set -eux; \
 #   默认取 latest 最新稳定版（重新打包时自动解析上游最新 Release + sha256 强校验）
 #   真实二进制置于 /usr/local/bin/xerj-real，包装入口 /usr/local/bin/xerj 支持惰性秒级自愈激活
 RUN set -eux; \
-    if [ "${XERJ_VERSION}" = "latest" ]; then \
-        curl -fsSL --retry 3 https://xerj.org/get | XERJ_INSTALL_DIR=/usr/local/bin XERJ_LIBC=musl sh; \
+    if [ "${XERJ_VERSION}" = "latest" ] || [ -z "${XERJ_VERSION}" ]; then \
+        XERJ_VER=""; \
     else \
-        curl -fsSL --retry 3 https://xerj.org/get | XERJ_VERSION="${XERJ_VERSION}" XERJ_INSTALL_DIR=/usr/local/bin XERJ_LIBC=musl sh; \
+        XERJ_VER="${XERJ_VERSION}"; \
     fi; \
+    curl -fsSL --retry 3 https://xerj.org/get | XERJ_VERSION="${XERJ_VER}" XERJ_INSTALL_DIR=/usr/local/bin XERJ_LIBC=musl sh; \
     mv /usr/local/bin/xerj /usr/local/bin/xerj-real; \
     chmod 0755 /usr/local/bin/xerj-real; \
     mkdir -p /var/lib/xerj/data /var/log; \
