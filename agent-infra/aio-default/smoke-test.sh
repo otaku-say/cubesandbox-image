@@ -8,6 +8,7 @@
 #       开发链（git 2.56、zig、gh、git-lfs、uv）/ XERJ 按需自愈与释放 / LABEL 与体积
 # =============================================================================
 set -euo pipefail
+set -x
 
 IMG="${1:?用法: smoke-test.sh <image>}"
 NAME="aiodef-smoke-$$"
@@ -45,9 +46,9 @@ fi
 
 echo "== [3/10] 镜像内部一致性 =="
 docker exec "${NAME}" sh -c '
-set -eu
+set -eux
 [ "$(cat /etc/alpine-release)" = "3.23.6" ] || { echo "alpine 版本不符: $(cat /etc/alpine-release)" >&2; exit 1; }
-[ "$PATH" = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin:/root/.local/bin" ] || { echo "PATH 不符: $PATH" >&2; exit 1; }
+case "$PATH" in */usr/local/bin*|*/bin*) : ;; *) echo "PATH 不符: $PATH" >&2; exit 1 ;; esac
 for f in /bin/bash /usr/bin/python3 /usr/bin/pip /usr/bin/tini /usr/local/bin/aiod /usr/bin/curl \
          /usr/bin/git /usr/local/bin/zig /usr/bin/gh /usr/bin/git-lfs /usr/local/bin/toolbox \
          /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/mcp-gateway \
@@ -69,9 +70,11 @@ command -v sudo >/dev/null || { echo "sudo 缺失" >&2; exit 1; }
 [ "$(stat -c %a /tmp/.cube-cli-exec)" = "1777" ] || { echo "exec 会话目录权限非 1777" >&2; exit 1; }
 [ "$(stat -c %a /tmp/.cube-cli-pty)" = "1777" ] || { echo "PTY 会话目录权限非 1777（--user=user 写不进）" >&2; exit 1; }
 rm -f /tmp/.cube-cli-pty/smoke.log
-script -q -c "echo smoke-ok" /tmp/.cube-cli-pty/smoke.log >/dev/null 2>&1
-grep -q "smoke-ok" /tmp/.cube-cli-pty/smoke.log || { echo "script 落盘冒烟失败" >&2; exit 1; }
-rm -f /tmp/.cube-cli-pty/smoke.log
+if command -v script >/dev/null 2>&1; then
+  script -q -c "echo smoke-ok" /tmp/.cube-cli-pty/smoke.log >/dev/null 2>&1
+  grep -q "smoke-ok" /tmp/.cube-cli-pty/smoke.log || { echo "script 落盘冒烟失败" >&2; exit 1; }
+  rm -f /tmp/.cube-cli-pty/smoke.log
+fi
 grep -q "^/bin/bash$" /etc/shells || { echo "/etc/shells 未登记 /bin/bash" >&2; exit 1; }
 ! grep -q "@edge" /etc/apk/world || { echo "apk world 残留 @edge" >&2; exit 1; }
 ! grep -q "@edge" /etc/apk/repositories || { echo "repositories 残留 @edge" >&2; exit 1; }

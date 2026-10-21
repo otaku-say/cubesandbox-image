@@ -16,7 +16,7 @@ command_not_found_handle() {
         unzip|zip) printf '  → 本环境自带 unzip/zip（支持加密包与 Zip64）\n' >&2 ;;
         pip) printf '  → 推荐使用 uv pip（速度大幅提升）：uv pip install <包>\n' >&2 ;;
         es|elasticsearch) printf '  → 本环境内置兼容 ES 8.x 的 XERJ 搜索引擎：http://127.0.0.1:9200，可用 xerj search/autoindex\n' >&2 ;;
-        *) printf '  → 提示：运行 toolbox 查看环境工具清单与使用指南；系统包缺失可通过 apk add <包> 安装\n' >&2 ;;
+        *) printf '  → 提示：运行 toolbox 查看环境工具清单与 ish-toolbox 使用指南；系统包缺失可通过 apk add <包> 安装\n' >&2 ;;
     esac
     return 127
 }
