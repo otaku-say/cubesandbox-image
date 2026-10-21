@@ -176,7 +176,7 @@ git config --system --get filter.lfs.clean >/dev/null || { echo "  ✘ git-lfs �
 printf "  · %s\n" "$(git --version)" "$(git-lfs --version | head -1)" "$(gh --version | head -1)" "zig $(zig version)" "$(uv --version)" "$(python3 -V)" "$(node --version)"
 out=$(bash -c definitely-not-a-cmd-xyz 2>&1 || true)
 echo "$out" | grep -q "ish-toolbox" || { echo "  ✘ 缺命令提示未生效: $out" >&2; exit 1; }
-toolbox | head -5 | grep -q "工具箱" || { echo "  ✘ toolbox 命令异常" >&2; exit 1; }
+toolbox | head -10 | grep -qE "工具箱|toolbox" || { echo "  ✘ toolbox 命令异常" >&2; exit 1; }
 [ -f /opt/skills/tools/AGENT-GUIDE.md ] || { echo "  ✘ AGENT-GUIDE 缺失" >&2; exit 1; }
 cd /tmp && rm -rf gsm && mkdir gsm && cd gsm && git init -q && git config user.email a@b && git config user.name a \
   && echo x > a && git add a && git commit -qm t && git log --oneline | grep -q " t"

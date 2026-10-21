@@ -1,7 +1,7 @@
-# aio-default 沙箱环境指南（AGENT-GUIDE）
+# aio-default 沙箱工具箱环境指南（AGENT-GUIDE）
 
 > 本沙箱为 **CubeSandbox 深度对齐环境**，集成：
-> 1. **ish-toolbox 静态工具**（GNU 套件与现代 CLI 增强）
+> 1. **ish-toolbox 静态工具箱**（GNU 套件与现代 CLI 增强）
 > 2. **apk 系统层**（解释器、编译工具链、网络与系统工具）
 > 3. **最新独立 uv / uvx 工具链**（极速 Python 包管理与工具运行器）
 > 4. **官方 mcp-gateway 服务**（E2B 兼容的 MCP 服务协议，支持内置/GitHub/自定义工具）
